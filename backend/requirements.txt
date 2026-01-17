@@ -1,0 +1,13 @@
+osmnx
+networkx
+pandas
+geopandas
+scikit-learn
+matplotlib
+folium
+numpy
+scipy
+fastapi
+uvicorn
+supabase
+python-dotenv

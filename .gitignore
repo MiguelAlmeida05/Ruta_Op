@@ -32,3 +32,11 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Project Specific
+cache/
+.env
+data/raw/
+node_modules/
+dist/
+.vercel/
