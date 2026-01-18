@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Product, Seller, RouteResult } from '../types';
+import { Metrics, Product, Seller, RouteResult } from '../types';
 import { getProducts, getSellers, simulateRoutes } from '../services/api';
 import { MapPin, Navigation, Clock, Truck, ShieldCheck, ChevronLeft, ChevronRight } from 'lucide-react';
 import clsx from 'clsx';
@@ -7,7 +7,7 @@ import clsx from 'clsx';
 interface ProductSimulatorProps {
   userLocation: [number, number] | null;
   onSellersUpdate: (sellers: Seller[]) => void;
-  onRoutesUpdate: (routes: RouteResult[], recommendedRoute: RouteResult | null, metrics: any) => void;
+  onRoutesUpdate: (routes: RouteResult[], recommendedRoute: RouteResult | null, metrics: Metrics | null) => void;
   selectedRouteId: string | null;
   onSelectRoute: (id: string) => void;
   showTraceability: boolean;
@@ -45,9 +45,9 @@ const ProductSimulator: React.FC<ProductSimulatorProps> = ({
 
   useEffect(() => {
     const fetchSellers = async () => {
-      if (!selectedProduct) return;
       try {
-        const sellers = await getSellers(selectedProduct);
+        // Si hay producto seleccionado, filtra. Si no, trae todos.
+        const sellers = await getSellers(selectedProduct || undefined);
         onSellersUpdate(sellers);
       } catch (error) {
         console.error("Error loading sellers:", error);
@@ -91,8 +91,8 @@ const ProductSimulator: React.FC<ProductSimulatorProps> = ({
       if (response.recommended_route) {
         onSelectRoute(response.recommended_route.seller_id);
       }
-    } catch (error) {
-      console.error("Error simulating routes:", error);
+    } catch {
+      // Error handling silently
       alert("Error al simular rutas. Verifica que el servidor backend esté corriendo.");
     } finally {
       setSimulationLoading(false);

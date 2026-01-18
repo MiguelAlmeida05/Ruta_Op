@@ -15,8 +15,8 @@ export default {
         background: "#121212",
         surface: "#212121",
         primary: {
-          DEFAULT: "#1E88E5",
-          hover: "#1565C0",
+          DEFAULT: "#00B0FF",
+          hover: "#0091EA",
         },
         text: {
           DEFAULT: "#E0E0E0",

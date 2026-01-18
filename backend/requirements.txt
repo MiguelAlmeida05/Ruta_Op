@@ -11,3 +11,6 @@ fastapi
 uvicorn
 supabase
 python-dotenv
+explainerdashboard
+joblib
+shap

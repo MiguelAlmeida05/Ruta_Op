@@ -8,9 +8,64 @@
   }
 }
 
-/* Leaflet dark mode overrides if needed */
+/* Leaflet dark mode overrides */
 .leaflet-container {
   background: #121212;
+}
+
+/* Dark Theme for Leaflet Popups */
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background-color: #212121 !important; /* surface */
+  color: #E0E0E0 !important; /* text */
+  border: 1px solid #424242; /* border */
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Custom Close Button for Leaflet Popups */
+.leaflet-container a.leaflet-popup-close-button {
+  color: #FFFFFF !important;
+  background-color: rgba(0, 0, 0, 0.2) !important;
+  font-family: system-ui, -apple-system, sans-serif !important;
+  font-size: 20px !important;
+  font-weight: 400 !important;
+  padding: 0 !important;
+  width: 28px !important;
+  height: 28px !important;
+  line-height: 28px !important;
+  border-radius: 50%;
+  top: 10px !important;
+  right: 10px !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  text-decoration: none !important;
+}
+
+.leaflet-container a.leaflet-popup-close-button:hover {
+  background-color: rgba(0, 0, 0, 0.4) !important;
+  color: #FFFFFF !important;
+  transform: scale(1.1);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.leaflet-container a.leaflet-popup-close-button:active {
+  transform: scale(0.95);
+  background-color: rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Ensure accessible focus state */
+.leaflet-container a.leaflet-popup-close-button:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
+
+.leaflet-popup-content {
+  margin: 0 !important;
+  width: auto !important;
 }
 
 /* Custom Scrollbar */

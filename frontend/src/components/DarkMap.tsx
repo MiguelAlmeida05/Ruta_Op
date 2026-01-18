@@ -2,9 +2,10 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, ZoomControl, Polyline, useMapEvents, LayersControl } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Seller, RouteResult } from '../types';
-import { Package, ShieldCheck, Star } from 'lucide-react';
+import { POI, Seller, RouteResult } from '../types';
+import { Package, ShieldCheck, Star, AlertTriangle } from 'lucide-react';
 import clsx from 'clsx';
+import { recalculateRoute } from '../services/api';
 
 const { BaseLayer } = LayersControl;
 
@@ -28,9 +29,9 @@ const UserIcon = L.divIcon({
   iconAnchor: [8, 8]
 });
 
-const SellerIcon = L.divIcon({
+const SellerIcon = (color: 'green' | 'yellow' | 'red') => L.divIcon({
   className: 'custom-icon',
-  html: `<div style="background-color: #4CAF50; width: 20px; height: 20px; transform: rotate(45deg); border: 2px solid white;"></div>`,
+  html: `<div style="background-color: ${color === 'green' ? '#4CAF50' : color === 'yellow' ? '#FFC107' : '#F44336'}; width: 20px; height: 20px; transform: rotate(45deg); border: 2px solid white;"></div>`,
   iconSize: [20, 20],
   iconAnchor: [10, 10]
 });
@@ -46,7 +47,7 @@ const createCustomIcon = (color: string) => new L.Icon({
 });
 
 const marketIcon = createCustomIcon('green');
-const clientIcon = createCustomIcon('blue');
+const clientIcon = createCustomIcon('blue'); // We keep this as is, assuming the image is generic blue
 const poiIcon = createCustomIcon('orange');
 
 const VehicleIcon = L.divIcon({
@@ -70,10 +71,11 @@ interface DarkMapProps {
   selectedRouteId: string | null;
   onSelectRoute: (id: string) => void;
   showTraceability?: boolean; 
-  pois?: any[]; 
+  pois?: POI[]; 
   selectedRoute?: RouteResult | null;
   isSimulating?: boolean;
   onSimulationEnd?: () => void;
+  onProgressUpdate?: (progress: number) => void;
   weight?: number;
 }
 
@@ -135,35 +137,148 @@ const DarkMap: React.FC<DarkMapProps> = ({
   selectedRoute = null,
   isSimulating = false,
   onSimulationEnd,
+  onProgressUpdate,
   weight = 100
 }) => {
   // Traceability synchronization
   const clientLocation: [number, number] | null = userLocation;
   const [vehiclePos, setVehiclePos] = useState<[number, number] | null>(null);
   
+  // Event Simulation State
+  const [activeEvent, setActiveEvent] = useState<{type: string, message: string} | null>(null);
+  const simulationIdRef = React.useRef<string>("");
+  const [dynamicPath, setDynamicPath] = useState<[number, number][] | null>(null);
+  const onProgressUpdateRef = React.useRef<DarkMapProps['onProgressUpdate']>(onProgressUpdate);
+  const onSimulationEndRef = React.useRef<DarkMapProps['onSimulationEnd']>(onSimulationEnd);
+  
+  const pathRef = React.useRef<[number, number][]>([]);
+  const stepRef = React.useRef(0);
+  const eventConfigRef = React.useRef<{triggerStep: number, type: string} | null>(null);
+  const isPausedRef = React.useRef(false);
+
+  useEffect(() => {
+    onProgressUpdateRef.current = onProgressUpdate;
+  }, [onProgressUpdate]);
+
+  useEffect(() => {
+    onSimulationEndRef.current = onSimulationEnd;
+  }, [onSimulationEnd]);
+  
   // Animation Logic
   useEffect(() => {
     if (isSimulating && selectedRoute && Array.isArray(selectedRoute.route_geometry) && selectedRoute.route_geometry.length > 0) {
-      let step = 0;
-      const path = selectedRoute.route_geometry;
-      const deliveryPath = [...path].reverse();
       
-      const interval = setInterval(() => {
-        if (step < deliveryPath.length) {
-          setVehiclePos(deliveryPath[step] as [number, number]);
-          step++;
-        } else {
-          clearInterval(interval);
-          setVehiclePos(null);
-          if (onSimulationEnd) onSimulationEnd();
+      // Initialize Simulation (only if new simulation)
+      if (simulationIdRef.current === "" || stepRef.current === 0) {
+         const newSimId = Math.random().toString(36).substring(7);
+         simulationIdRef.current = newSimId;
+         stepRef.current = 0;
+         // Delivery goes from Seller -> User. Route is usually User -> Seller. So we reverse.
+         pathRef.current = [...selectedRoute.route_geometry].reverse();
+         setDynamicPath(null);
+         setActiveEvent(null);
+         isPausedRef.current = false;
+         
+         // Stochastic Event Config
+         const rand = Math.random();
+         let eventType = null;
+         // 20% Rain, 30% Traffic, 5% Protest => 55% chance of event
+         if (rand < 0.20) eventType = 'rain';
+         else if (rand < 0.50) eventType = 'traffic';
+         else if (rand < 0.55) eventType = 'protest';
+         
+         if (eventType) {
+             const totalSteps = pathRef.current.length;
+             // Trigger between 20% and 80% of the route
+             const triggerStep = Math.floor(totalSteps * (0.2 + Math.random() * 0.6)); 
+             eventConfigRef.current = { triggerStep, type: eventType };
+             console.log(`[Simulation] Event '${eventType}' scheduled at step ${triggerStep}/${totalSteps}`);
+         } else {
+             eventConfigRef.current = null;
+         }
+      }
+
+      const animate = async () => {
+        if (isPausedRef.current) return;
+
+        // Check Event Trigger
+        if (eventConfigRef.current && stepRef.current === eventConfigRef.current.triggerStep) {
+            isPausedRef.current = true;
+            const evt = eventConfigRef.current;
+            eventConfigRef.current = null; // Ensure it triggers only once
+            
+            const typeLabels: Record<string, string> = { 
+                rain: 'Lluvia Intensa', 
+                traffic: 'Tráfico Pesado', 
+                protest: 'Protesta / Cierre' 
+            };
+            
+            setActiveEvent({ 
+                type: evt.type, 
+                message: `Evento inesperado: ${typeLabels[evt.type]}. Recalculando ruta...` 
+            });
+            
+            try {
+                const currentPos = pathRef.current[stepRef.current];
+                // Destination is the last point of the current path (User Location)
+                const destPos = pathRef.current[pathRef.current.length - 1];
+                
+                const result = await recalculateRoute(
+                    currentPos[0], currentPos[1],
+                    destPos[0], destPos[1],
+                    evt.type,
+                    simulationIdRef.current,
+                    stepRef.current / pathRef.current.length
+                );
+                
+                // Update Path: Keep traveled part, append new calculated part
+                const traveledPath = pathRef.current.slice(0, stepRef.current + 1);
+                const newGeometry = result.route_geometry; // This is Current -> Dest
+                
+                // Merge
+                const combinedPath = [...traveledPath, ...newGeometry];
+                
+                pathRef.current = combinedPath;
+                setDynamicPath(combinedPath); // Visual update
+                
+                // Resume after delay
+                setTimeout(() => {
+                    setActiveEvent(prev => prev ? { ...prev, message: `Ruta actualizada. (+${(result.duration_min).toFixed(1)} min)` } : null);
+                    setTimeout(() => setActiveEvent(null), 3000); 
+                    isPausedRef.current = false;
+                }, 2000);
+                
+            } catch (e) {
+                console.error("Failed to recalculate route:", e);
+                isPausedRef.current = false; // Resume if fail
+            }
+            return;
         }
-      }, 50); // Speed of animation
+
+        if (stepRef.current < pathRef.current.length) {
+          setVehiclePos(pathRef.current[stepRef.current] as [number, number]);
+          onProgressUpdateRef.current?.(stepRef.current / pathRef.current.length);
+          stepRef.current++;
+        } else {
+          // End of simulation
+          // Do not clear interval here, let useEffect cleanup handle it or set state
+          // But we need to stop.
+          isPausedRef.current = true; 
+          setVehiclePos(null);
+          onProgressUpdateRef.current?.(1);
+          onSimulationEndRef.current?.();
+          simulationIdRef.current = ""; 
+        }
+      };
+      
+      const interval = setInterval(animate, 50); // Speed of animation
 
       return () => clearInterval(interval);
     } else {
       setVehiclePos(null);
+      simulationIdRef.current = "";
     }
-  }, [isSimulating, selectedRoute, onSimulationEnd]);
+  }, [isSimulating, selectedRoute]); // Dependencies
 
   const activeSellers = useMemo(() => {
     if (showTraceability) {
@@ -187,7 +302,7 @@ const DarkMap: React.FC<DarkMapProps> = ({
           <BaseLayer checked name="Modo Oscuro">
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
             />
           </BaseLayer>
           <BaseLayer name="Google Maps Satélite">
@@ -260,46 +375,81 @@ const DarkMap: React.FC<DarkMapProps> = ({
           const route = routes.find(r => r.seller_id === seller.id);
           const price = route ? (route.price_per_unit * weight).toFixed(2) : '0.00';
           
+          // Clasificación visual en el mapa
+          let markerColor: 'green' | 'yellow' | 'red' = 'green';
+          if (seller.rating && seller.trips_count) {
+            if (seller.rating < 3.5 || seller.trips_count < 5) {
+              markerColor = 'red';
+            } else if (seller.rating < 4.5) {
+              markerColor = 'yellow';
+            }
+          }
+
           return (
             <Marker 
               key={seller.id} 
               position={[seller.coordinates.lat, seller.coordinates.lng]}
-              icon={SellerIcon}
+              icon={SellerIcon(markerColor)}
             >
-              <Popup>
-                <div className="w-64 p-1">
-                  <div className="bg-primary text-white p-3 rounded-t-lg -mx-4 -mt-4 mb-3 flex justify-between items-center">
-                    <h3 className="font-bold flex items-center gap-2">
-                      <Package size={18} />
-                      {seller.name}
+              <Popup className="custom-popup">
+                <div className="w-64">
+                  <div className={clsx(
+                    "text-white p-3 pr-12 rounded-t-lg mb-3 flex flex-col justify-center relative min-h-[60px]",
+                    markerColor === 'red' ? "bg-red-600" : markerColor === 'yellow' ? "bg-yellow-600" : "bg-primary"
+                  )}>
+                    <h3 className="font-bold flex items-center gap-2 text-base leading-tight mb-1">
+                      <Package size={18} className="flex-shrink-0" />
+                      <span className="truncate">{seller.name}</span>
                     </h3>
-                    <div className="flex gap-0.5">
+                    <div className="flex gap-0.5 ml-[26px]">
                       {[1, 2, 3, 4, 5].map(s => (
-                        <Star key={s} size={10} className={clsx(s <= (seller.rating || 0) ? "fill-yellow-400 text-yellow-400" : "text-white/30")} />
+                        <Star key={s} size={14} className={clsx(s <= (seller.rating || 0) ? "fill-yellow-400 text-yellow-400" : "text-white/30")} />
                       ))}
                     </div>
                   </div>
                   
-                  <div className="space-y-3 text-sm text-gray-700">
-                    <div className="flex justify-between border-b pb-2">
+                  <div className="px-3 pb-3 space-y-3 text-sm text-gray-300">
+                    <div className="flex justify-between border-b border-white/10 pb-2">
                       <span className="text-gray-500">Tipo:</span>
-                      <span className="font-medium">{seller.type}</span>
+                      <span className="font-medium text-white">{seller.type}</span>
                     </div>
+                    
+                    <div className="grid grid-cols-2 gap-2 text-center">
+                      <div className="bg-white/5 p-2 rounded border border-white/10">
+                        <div className="text-xs text-gray-500">Viajes</div>
+                        <div className="font-bold text-primary">{seller.trips_count || 0}</div>
+                      </div>
+                      <div className="bg-white/5 p-2 rounded border border-white/10">
+                        <div className="text-xs text-gray-500">Calificación</div>
+                        <div className="font-bold text-yellow-500">{seller.rating || 0}</div>
+                      </div>
+                    </div>
+
+                    {markerColor === 'red' && (
+                      <div className="bg-red-500/10 text-red-400 text-xs px-2 py-1 rounded border border-red-500/20 text-center font-bold">
+                        En Crecimiento
+                      </div>
+                    )}
+
                     {route && (
                       <>
-                        <div className="flex justify-between border-b pb-2">
+                        <div className="flex justify-between border-b border-white/10 pb-2">
                           <span className="text-gray-500">Precio Est. ({weight} qq):</span>
-                          <span className="text-success font-bold">${price}</span>
+                          <span className="text-green-400 font-bold">${price}</span>
                         </div>
-                        <div className="flex justify-between border-b pb-2">
-                          <span className="text-gray-500">Entrega:</span>
+                        <div className="flex justify-between border-b border-white/10 pb-2">
+                          <span className="text-gray-500">Distancia:</span>
+                          <span className="font-bold text-white">{route.distance_km} km</span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/10 pb-2">
+                          <span className="text-gray-500">Tiempo:</span>
                           <span className="font-bold text-primary">{route.duration_min} min</span>
                         </div>
                       </>
                     )}
                     <div className="flex justify-between">
                       <span className="text-gray-500">Productos:</span>
-                      <span className="text-xs text-right max-w-[120px]">{seller.products.join(', ')}</span>
+                      <span className="text-xs text-right max-w-[120px] text-gray-400">{seller.products.join(', ')}</span>
                     </div>
                   </div>
                 </div>
@@ -349,6 +499,20 @@ const DarkMap: React.FC<DarkMapProps> = ({
           );
         })}
 
+        {/* Dynamic Route (Event Triggered) */}
+        {dynamicPath && (
+           <Polyline
+             positions={dynamicPath}
+             pathOptions={{
+               color: '#FF5722', // Orange/Red for changed route
+               weight: 6,
+               opacity: 0.9,
+               lineJoin: 'round',
+               dashArray: '10, 5'
+             }}
+           />
+        )}
+
         {/* --- TRACEABILITY MODE ELEMENTS --- */}
         {showTraceability && clientLocation && (
           <>
@@ -356,26 +520,41 @@ const DarkMap: React.FC<DarkMapProps> = ({
                 <React.Fragment key={s.id}>
                   <Marker position={[s.coordinates.lat, s.coordinates.lng]} icon={marketIcon}>
                     <Popup>
-                      <div className="w-64 p-1">
-                        <div className="bg-blue-600 text-white p-3 rounded-t-lg -mx-4 -mt-4 mb-3 flex justify-between items-center">
-                          <h3 className="font-bold flex items-center gap-2">
-                            <Package size={18} />
-                            {s.name}
-                          </h3>
-                          <span className="bg-blue-500 text-[10px] px-2 py-1 rounded">Origen</span>
-                        </div>
-                        <div className="space-y-3 text-sm text-gray-700">
-                          <div className="flex justify-between border-b pb-2">
+                      <div className="w-64 max-w-[calc(100vw-40px)]">
+                      <div className="bg-primary text-white p-3 pr-12 rounded-t-lg mb-3 flex flex-col justify-center relative min-h-[60px]">
+                        <h3 className="font-bold flex items-center gap-2 text-base leading-tight mb-1">
+                          <Package size={18} className="flex-shrink-0" />
+                          <span className="truncate">{s.name}</span>
+                        </h3>
+                        <span className="bg-white/20 text-[10px] px-2 py-0.5 rounded self-start ml-[26px]">Origen</span>
+                      </div>
+                      <div className="px-3 pb-3 space-y-3 text-sm text-gray-300">
+                          <div className="flex justify-between border-b border-white/10 pb-2">
                             <span className="text-gray-500">Estado:</span>
-                            <span className="text-success font-bold">Despachado</span>
+                            <span className="text-green-400 font-bold">Despachado</span>
                           </div>
-                          <div className="flex justify-between border-b pb-2">
+                          <div className="flex justify-between border-b border-white/10 pb-2">
                             <span className="text-gray-500">Lote:</span>
                             <span className="font-mono text-xs">#2024-X89</span>
                           </div>
+                          
+                          {/* Metrics of the executed route */}
+                          {selectedRoute && (
+                            <>
+                              <div className="flex justify-between border-b border-white/10 pb-2">
+                                <span className="text-gray-500">Tiempo Real:</span>
+                                <span className="font-bold text-primary">{selectedRoute.duration_min} min</span>
+                              </div>
+                              <div className="flex justify-between border-b border-white/10 pb-2">
+                                <span className="text-gray-500">Distancia:</span>
+                                <span className="font-bold text-white">{selectedRoute.distance_km} km</span>
+                              </div>
+                            </>
+                          )}
+
                           <div className="flex justify-between">
                             <span className="text-gray-500">Blockchain:</span>
-                            <span className="text-xs text-blue-600 font-bold flex items-center gap-1">
+                            <span className="text-xs text-primary font-bold flex items-center gap-1">
                               <ShieldCheck size={12} /> Verificado
                             </span>
                           </div>
@@ -389,7 +568,7 @@ const DarkMap: React.FC<DarkMapProps> = ({
                     <Polyline 
                       positions={selectedRoute.route_geometry} 
                       pathOptions={{ 
-                        color: '#3b82f6', 
+                        color: '#00B0FF', 
                         weight: 3, 
                         opacity: 0.8, 
                         dashArray: '10, 10',
@@ -399,7 +578,7 @@ const DarkMap: React.FC<DarkMapProps> = ({
                   ) : (
                     <Polyline 
                       positions={[[s.coordinates.lat, s.coordinates.lng], clientLocation]} 
-                      pathOptions={{ color: '#3b82f6', weight: 2, opacity: 0.6, dashArray: '5, 10' }} 
+                      pathOptions={{ color: '#00B0FF', weight: 2, opacity: 0.6, dashArray: '5, 10' }} 
                     />
                   )}
                 </React.Fragment>
@@ -407,35 +586,50 @@ const DarkMap: React.FC<DarkMapProps> = ({
 
             <Marker position={clientLocation} icon={clientIcon}>
                 <Popup className="custom-popup">
-                   <div className="w-80 p-1">
-                      <div className="bg-blue-600 text-white p-3 rounded-t-lg -mx-4 -mt-4 mb-3 flex justify-between items-center">
-                        <h3 className="font-bold flex items-center gap-2">
-                           <Package size={18} />
-                           Trazabilidad del Lote
+                   <div className="w-80 max-w-[calc(100vw-40px)]">
+                      <div className="bg-primary text-white p-3 pr-12 rounded-t-lg mb-3 flex flex-col justify-center relative min-h-[60px]">
+                        <h3 className="font-bold flex items-center gap-2 text-base leading-tight mb-1">
+                           <Package size={18} className="flex-shrink-0" />
+                           <span className="truncate">Trazabilidad del Lote</span>
                         </h3>
-                        <span className="bg-blue-500 text-xs px-2 py-1 rounded">Lote #2024-X89</span>
+                        <span className="bg-white/20 text-xs px-2 py-0.5 rounded self-start ml-[26px]">Lote #2024-X89</span>
                       </div>
                       
-                      <div className="space-y-3 text-sm text-gray-700">
-                        <div className="flex justify-between border-b pb-2">
+                      <div className="px-3 pb-3 space-y-3 text-sm text-gray-300">
+                        <div className="flex justify-between border-b border-white/10 pb-2">
                           <span className="text-gray-500">Origen:</span>
-                          <span className="font-medium text-right">Valle del Río Portoviejo</span>
+                          <span className="font-medium text-right text-white">Valle del Río Portoviejo</span>
                         </div>
-                        <div className="flex justify-between border-b pb-2">
+                        <div className="flex justify-between border-b border-white/10 pb-2">
                           <span className="text-gray-500">Frescura:</span>
-                          <span className="text-green-600 font-bold">Grado AA (Premium)</span>
+                          <span className="text-green-400 font-bold">Grado AA (Premium)</span>
                         </div>
-                         <div className="flex justify-between border-b pb-2">
+                         <div className="flex justify-between border-b border-white/10 pb-2">
                           <span className="text-gray-500">Proveedor:</span>
-                          <span className="font-medium">Asoc. Agricultores Manabitas</span>
+                          <span className="font-medium text-white">Asoc. Agricultores Manabitas</span>
                         </div>
+
+                         {/* Delivery Metrics Summary */}
+                         {selectedRoute && (
+                            <div className="bg-blue-500/10 p-2 rounded border border-blue-500/20 mb-2">
+                              <div className="text-xs text-blue-300 font-bold mb-1 uppercase tracking-wider">Resumen de Entrega</div>
+                              <div className="flex justify-between text-xs">
+                                <span>Tiempo Total:</span>
+                                <span className="font-bold text-white">{selectedRoute.duration_min} min</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                <span>Recorrido:</span>
+                                <span className="font-bold text-white">{selectedRoute.distance_km} km</span>
+                              </div>
+                            </div>
+                         )}
                         
-                        <div className="bg-gray-50 p-3 rounded border border-gray-200 mt-2">
-                          <div className="text-xs font-mono text-gray-400 mb-1">BLOCKCHAIN HASH</div>
-                          <div className="text-xs font-mono break-all text-gray-600">
+                        <div className="bg-white/5 p-3 rounded border border-white/10 mt-2">
+                          <div className="text-xs font-mono text-gray-500 mb-1">BLOCKCHAIN HASH</div>
+                          <div className="text-xs font-mono break-all text-gray-400">
                             0x71C7656EC7ab88b098defB751B7401B5f6d8976F
                           </div>
-                          <div className="flex items-center gap-1 mt-2 text-green-600 text-xs font-bold">
+                          <div className="flex items-center gap-1 mt-2 text-green-400 text-xs font-bold">
                             <ShieldCheck size={12} />
                             Verificado en Blockchain
                           </div>
@@ -454,7 +648,7 @@ const DarkMap: React.FC<DarkMapProps> = ({
         {!showTraceability ? (
             <>
                 <div className="flex items-center gap-2 mb-1">
-                <div className="w-3 h-3 rounded-full bg-[#1E88E5] border border-white"></div>
+                <div className="w-3 h-3 rounded-full bg-[#00B0FF] border border-white"></div>
                 <span>Tu Ubicación</span>
                 </div>
                 <div className="flex items-center gap-2 mb-1">
@@ -462,9 +656,15 @@ const DarkMap: React.FC<DarkMapProps> = ({
                 <span>Punto de Venta</span>
                 </div>
                 <div className="flex items-center gap-2">
-                <div className="w-8 h-1 bg-[#1E88E5]"></div>
+                <div className="w-8 h-1 bg-[#00B0FF]"></div>
                 <span>Ruta Óptima</span>
                 </div>
+                {dynamicPath && (
+                  <div className="flex items-center gap-2 mt-1 font-bold text-orange-500">
+                    <div className="w-4 h-1 bg-[#FF5722] border-white"></div>
+                    <span>Ruta Recalculada</span>
+                  </div>
+                )}
             </>
         ) : (
             <>
@@ -479,6 +679,20 @@ const DarkMap: React.FC<DarkMapProps> = ({
             </>
         )}
       </div>
+      
+      {/* Event Alert Overlay */}
+      {activeEvent && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-[2000] bg-red-600 text-white px-6 py-3 rounded-lg shadow-2xl flex items-center gap-3 animate-pulse border-2 border-white/20 transition-all duration-300">
+            <AlertTriangle className="animate-bounce" size={24} />
+            <div>
+                <strong className="block text-xs uppercase tracking-wider font-bold opacity-80">
+                    {activeEvent.type === 'rain' ? 'Alerta Meteorológica' : activeEvent.type === 'protest' ? 'Alerta Civil' : 'Tráfico'}
+                </strong>
+                <span className="text-sm font-medium">{activeEvent.message}</span>
+            </div>
+        </div>
+      )}
+
     </div>
   );
 };

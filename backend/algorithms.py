@@ -2,15 +2,34 @@ import networkx as nx
 import heapq
 import time
 import math
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def haversine_heuristic(u, v, G):
     """
     Heuristic function for A* using Haversine distance.
     Assumes nodes have 'y' (lat) and 'x' (lon) attributes.
+    
+    Formula:
+    a = sin²(Δφ/2) + cos φ1 ⋅ cos φ2 ⋅ sin²(Δλ/2)
+    c = 2 ⋅ atan2( √a, √(1−a) )
+    d = R ⋅ c
     """
+    if u not in G or v not in G:
+        logger.error(f"Node {u} or {v} not found in graph")
+        return float('inf')
+
     u_node = G.nodes[u]
     v_node = G.nodes[v]
     
+    # Validate coordinates
+    if 'y' not in u_node or 'x' not in u_node or 'y' not in v_node or 'x' not in v_node:
+         logger.warning(f"Missing coordinates for nodes {u} or {v}")
+         return 0
+
     R = 6371000  # Radius of Earth in meters
     phi1 = math.radians(u_node['y'])
     phi2 = math.radians(v_node['y'])
@@ -28,13 +47,24 @@ def haversine_heuristic(u, v, G):
     return (R * c) / max_speed_mps
 
 class PathFinder:
-    def __init__(self, G):
+    def __init__(self, G: nx.MultiDiGraph):
         self.G = G
 
-    def run_dijkstra(self, source, target, weight='weight'):
+    def run_dijkstra(self, source, target, weight='weight', event_type=None):
         """
         Runs Dijkstra's algorithm and returns path and stats.
+        Supports dynamic events: 'rain', 'traffic', 'protest'.
+        
+        Args:
+            source: Source node ID
+            target: Target node ID
+            weight: Edge attribute for weight
+            event_type: 'rain', 'traffic', 'protest' or None
         """
+        if source not in self.G or target not in self.G:
+            logger.error(f"Source {source} or Target {target} not in graph")
+            return {"algorithm": "Dijkstra", "path": [], "cost": float('inf'), "error": "Node not found"}
+
         start_time = time.time()
         explored_count = 0
         
@@ -67,8 +97,43 @@ class PathFinder:
                 break
             
             for v, data in self.G[u].items():
-                edge_weight = float(data[0].get(weight, 1))
-                new_cost = current_cost + edge_weight
+                edge_data = data[0] # Multigraph
+                base_weight = float(edge_data.get(weight, 1))
+                
+                if base_weight < 0:
+                    logger.warning(f"Negative weight found on edge {u}->{v}: {base_weight}. treating as 0.")
+                    base_weight = 0
+
+                # --- EVENT LOGIC ---
+                penalty = 1.0
+                
+                if event_type == 'rain':
+                    # Penalize secondary and unpaved roads
+                    highway = edge_data.get('highway', '')
+                    if isinstance(highway, list): highway = highway[0]
+                    if highway in ['track', 'path', 'service', 'residential', 'tertiary']:
+                        penalty = 2.5 # Slower due to mud/rain
+                    elif highway in ['primary', 'secondary']:
+                        penalty = 1.2 # Slight delay
+                        
+                elif event_type == 'traffic':
+                    # Penalize primary roads (congestion)
+                    highway = edge_data.get('highway', '')
+                    if isinstance(highway, list): highway = highway[0]
+                    if highway in ['primary', 'trunk', 'primary_link']:
+                        penalty = 3.0 # Heavy traffic
+                    elif highway in ['secondary', 'tertiary']:
+                        penalty = 1.5 # Moderate traffic
+                        
+                elif event_type == 'protest':
+                    # Block specific main avenues (simulate by huge penalty)
+                    highway = edge_data.get('highway', '')
+                    if isinstance(highway, list): highway = highway[0]
+                    if highway in ['trunk', 'primary']:
+                        penalty = 10.0 # Effectively blocked/avoid
+                
+                modified_weight = base_weight * penalty
+                new_cost = current_cost + modified_weight
                 
                 if new_cost < min_dist.get(v, float('inf')):
                     min_dist[v] = new_cost
@@ -77,6 +142,9 @@ class PathFinder:
                     
         end_time = time.time()
         
+        if not final_path:
+             logger.warning(f"No path found between {source} and {target}")
+
         return {
             "algorithm": "Dijkstra",
             "path": final_path,
@@ -88,7 +156,12 @@ class PathFinder:
     def run_astar(self, source, target, weight='weight'):
         """
         Runs A* algorithm and returns path and stats.
+        Uses Haversine heuristic.
         """
+        if source not in self.G or target not in self.G:
+            logger.error(f"Source {source} or Target {target} not in graph")
+            return {"algorithm": "A*", "path": [], "cost": float('inf'), "error": "Node not found"}
+
         start_time = time.time()
         explored_count = 0
         
@@ -122,6 +195,9 @@ class PathFinder:
             
             for v, data in self.G[u].items():
                 edge_weight = float(data[0].get(weight, 1))
+                if edge_weight < 0:
+                     edge_weight = 0
+                     
                 new_cost = current_cost + edge_weight
                 
                 if new_cost < min_dist.get(v, float('inf')):

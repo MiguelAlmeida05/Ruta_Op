@@ -1,5 +1,5 @@
 {
-  "name": "rutaop-root",
+  "name": "tudistri-root",
   "private": true,
   "scripts": {
     "install:all": "npm install --prefix frontend && pip install -r backend/requirements.txt",

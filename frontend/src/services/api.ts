@@ -1,7 +1,7 @@
 import axios from 'axios';
-import { Product, Seller, RouteResult } from '../types';
+import { POI, Product, Seller, RouteResult } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api';
 
 export const getProducts = async (): Promise<Product[]> => {
   const response = await axios.get(`${API_URL}/products`);
@@ -14,7 +14,7 @@ export const getSellers = async (productId?: string): Promise<Seller[]> => {
   return response.data.sellers;
 };
 
-export const getPOIs = async (category?: string): Promise<any[]> => {
+export const getPOIs = async (category?: string): Promise<POI[]> => {
   const url = category ? `${API_URL}/pois?category=${category}` : `${API_URL}/pois`;
   const response = await axios.get(url);
   return response.data.pois;
@@ -37,6 +37,34 @@ export const simulateRoutes = async (userLat: number, userLng: number, productId
     user_lng: userLng,
     product_id: productId,
     weight: weight
+  });
+  return response.data;
+};
+
+export interface RecalculateResponse {
+  route_geometry: [number, number][];
+  distance_km: number;
+  duration_min: number;
+  event_applied: string;
+}
+
+export const recalculateRoute = async (
+  currentLat: number, 
+  currentLng: number, 
+  destLat: number, 
+  destLng: number, 
+  eventType: string,
+  simulationId?: string,
+  progress?: number
+): Promise<RecalculateResponse> => {
+  const response = await axios.post(`${API_URL}/routes/recalculate`, {
+    current_lat: currentLat,
+    current_lng: currentLng,
+    dest_lat: destLat,
+    dest_lng: destLng,
+    event_type: eventType,
+    simulation_id: simulationId,
+    progress: progress
   });
   return response.data;
 };
