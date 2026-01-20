@@ -2,10 +2,17 @@ import random
 from enum import Enum
 import math
 import logging
+import threading
+from typing import Dict, Optional
+import uuid
+from ml.eta_predictor import ETAPredictor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Global ML Predictor instance
+_eta_predictor = ETAPredictor()
 
 class SimulationState(Enum):
     NORMAL = "Normal"
@@ -34,6 +41,68 @@ class MarkovChain:
         
     def get_state(self):
         return self.current_state
+
+    def to_dict(self):
+        """Serializa el estado actual para persistencia."""
+        return {"current_state": self.current_state.value}
+
+    def from_dict(self, data):
+        """Restaura el estado desde un diccionario."""
+        if "current_state" in data:
+            try:
+                self.current_state = SimulationState(data["current_state"])
+            except ValueError:
+                logger.warning(f"Invalid state {data['current_state']}, keeping default.")
+
+class SimulationSessionManager:
+    """
+    Gestor de sesiones para mantener estados de simulación aislados por usuario.
+    Thread-safe para acceso concurrente.
+    """
+    def __init__(self):
+        self._sessions: Dict[str, MarkovChain] = {}
+        self._lock = threading.Lock()
+
+    def get_session(self, session_id: str) -> MarkovChain:
+        """
+        Obtiene la cadena de Markov asociada a una sesión.
+        Si no existe, crea una nueva.
+        """
+        with self._lock:
+            if session_id not in self._sessions:
+                self._sessions[session_id] = MarkovChain()
+            return self._sessions[session_id]
+
+    def create_session(self) -> str:
+        """
+        Crea una nueva sesión y retorna su ID.
+        """
+        session_id = str(uuid.uuid4())
+        with self._lock:
+            self._sessions[session_id] = MarkovChain()
+        return session_id
+        
+    def delete_session(self, session_id: str):
+        """
+        Elimina una sesión y libera recursos.
+        """
+        with self._lock:
+            if session_id in self._sessions:
+                del self._sessions[session_id]
+
+    def export_session(self, session_id: str) -> Optional[Dict]:
+        """Exporta el estado de una sesión para persistencia."""
+        with self._lock:
+            if session_id in self._sessions:
+                return self._sessions[session_id].to_dict()
+            return None
+
+    def import_session(self, session_id: str, data: Dict):
+        """Importa/Restaura una sesión desde datos persistidos."""
+        with self._lock:
+            chain = MarkovChain()
+            chain.from_dict(data)
+            self._sessions[session_id] = chain
 
 class FactorSimulator:
     @staticmethod
@@ -91,17 +160,45 @@ class FactorSimulator:
 
         for _ in range(n_iterations):
             # 1. Factor Tiempo (Multiplicador sobre base)
-            if state == SimulationState.NORMAL:
-                time_params = (0.95, 1.0, 1.05)
-            elif state == SimulationState.TRAFFIC:
-                time_params = (1.2, 1.4, 1.8)
-            elif state == SimulationState.RAIN:
-                time_params = (1.1, 1.25, 1.4)
-            else: # STRIKE
-                time_params = (1.5, 2.0, 3.0)
+            # Intentar predicción ML primero
+            ml_duration = None
+            if _eta_predictor.model_loaded:
+                # Mapear estado a features
+                weather_data = {'rain_mm': 0}
+                traffic_data = {'level': 0}
                 
-            time_factor = random.triangular(*time_params)
-            results["simulated_duration"].append(calibrated_base_time * time_factor)
+                if state == SimulationState.RAIN:
+                    weather_data['rain_mm'] = 20
+                elif state == SimulationState.TRAFFIC:
+                    traffic_data['level'] = 0.8
+                elif state == SimulationState.STRIKE:
+                    traffic_data['level'] = 1.0
+                
+                ml_duration = _eta_predictor.predict(
+                    base_duration_min=calibrated_base_time,
+                    distance_km=distance_km,
+                    weather_data=weather_data,
+                    traffic_data=traffic_data
+                )
+
+            if ml_duration:
+                # Usar ML con ruido reducido (Gaussian) para simular varianza residual
+                # Desviación estándar del 3% vs Triangular amplia anterior
+                noise = random.normalvariate(1.0, 0.03) 
+                results["simulated_duration"].append(ml_duration * noise)
+            else:
+                # Fallback: Heurística Triangular
+                if state == SimulationState.NORMAL:
+                    time_params = (0.95, 1.0, 1.05)
+                elif state == SimulationState.TRAFFIC:
+                    time_params = (1.2, 1.4, 1.8)
+                elif state == SimulationState.RAIN:
+                    time_params = (1.1, 1.25, 1.4)
+                else: # STRIKE
+                    time_params = (1.5, 2.0, 3.0)
+                    
+                time_factor = random.triangular(*time_params)
+                results["simulated_duration"].append(calibrated_base_time * time_factor)
             
             # 2. Factor Frescura (Degradación por minuto)
             if state == SimulationState.NORMAL:

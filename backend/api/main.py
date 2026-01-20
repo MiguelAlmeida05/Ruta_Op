@@ -38,13 +38,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from simulation_engine import MarkovChain, FactorSimulator, KPICalculator, AdminKPICalculator
+from simulation_engine import MarkovChain, FactorSimulator, KPICalculator, AdminKPICalculator, SimulationSessionManager
 from validation.validator_service import ValidatorService
 
 # Global variables
 graph = None
 path_finder = None
-markov_chain = MarkovChain() # Estado global del sistema
+session_manager = SimulationSessionManager() # Gestor de sesiones de simulación
 validator_service = None
 
 @app.on_event("startup")
@@ -69,7 +69,7 @@ async def startup_event():
         path_finder = None
 
 @app.get("/health")
-async def health_check():
+def health_check():
     return {
         "status": "ok" if graph is not None else "degraded",
         "graph_loaded": graph is not None,
@@ -88,6 +88,7 @@ class SimulationRequest(BaseModel):
     user_lng: float
     product_id: str
     weight: float = 1.0
+    session_id: Optional[str] = None # ID de sesión para mantener estado de simulación
 
 class RecalculateRequest(BaseModel):
     current_lat: float
@@ -96,10 +97,11 @@ class RecalculateRequest(BaseModel):
     dest_lng: float
     event_type: str
     simulation_id: Optional[str] = None
+    session_id: Optional[str] = None # ID de sesión para mantener estado de simulación
     progress: Optional[float] = 0.0
 
 @app.post("/api/routes/recalculate")
-async def recalculate_route(request: RecalculateRequest):
+def recalculate_route(request: RecalculateRequest):
     if graph is None:
         raise HTTPException(status_code=503, detail="Graph service not available")
 
@@ -164,16 +166,16 @@ async def recalculate_route(request: RecalculateRequest):
     }
 
 @app.get("/")
-async def root():
+def root():
     return {"message": "Welcome to TuDistri API"}
 
 @app.get("/api/products")
-async def get_products():
+def get_products():
     response = supabase.table("products").select("*").execute()
     return {"products": response.data}
 
 @app.get("/api/sellers")
-async def get_sellers(product_id: Optional[str] = None):
+def get_sellers(product_id: Optional[str] = None):
     if product_id:
         # Use Postgres array contains operator @>
         response = supabase.table("sellers").select("*").filter("products", "cs", f"{{{product_id}}}").execute()
@@ -190,7 +192,7 @@ async def get_pois(category: Optional[str] = None):
     return {"pois": response.data}
 
 @app.post("/api/routes/simulate")
-async def simulate_routes(request: SimulationRequest):
+def simulate_routes(request: SimulationRequest):
     if graph is None:
         raise HTTPException(status_code=503, detail="Graph service not available")
 
@@ -367,6 +369,7 @@ async def simulate_routes(request: SimulationRequest):
         print(f"Error persisting data: {e}")
 
     return {
+        "session_id": session_id, # Devolver session_id para que el cliente lo mantenga
         "recommended_route": routes_result[0] if routes_result else None,
         "all_routes": routes_result,
         "metrics": {
@@ -388,7 +391,7 @@ async def simulate_routes(request: SimulationRequest):
     }
 
 @app.get("/api/validation/stats")
-async def get_validation_stats():
+def get_validation_stats():
     """
     Endpoint para obtener métricas de validación en tiempo real.
     Ejecuta pruebas estadísticas sobre algoritmos y simulación.
