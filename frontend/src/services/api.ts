@@ -1,8 +1,21 @@
 import axios from 'axios';
-import { POI, Product, Seller, RouteResult } from '../types';
+import { POI, Product, Seller, SimulationResponse } from '../types';
+import { config } from '../config';
 
 const DEFAULT_API_URL = 'http://127.0.0.1:8000/api';
-const PRIMARY_API_URL = import.meta.env.VITE_API_URL || DEFAULT_API_URL;
+const PRIMARY_API_URL = config.API_URL || DEFAULT_API_URL;
+
+export class ApiError extends Error {
+  requestId?: string;
+  originalError?: unknown;
+
+  constructor(message: string, requestId?: string, originalError?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.requestId = requestId;
+    this.originalError = originalError;
+  }
+}
 
 const getAlternateApiUrl = (url: string): string | null => {
   try {
@@ -71,11 +84,24 @@ const withApiFallback = async <T>(
     const cached = safeGetCache<T>(cacheKey);
     if (cached !== null) {
       console.warn(`API unavailable; using cached response for ${cacheKey}`);
+      // Notificamos que estamos usando cache (podría hacerse via store, pero api.ts es agnóstico de react)
+      // En una implementación más avanzada, podríamos inyectar el notificador o usar eventos
       return cached;
     }
   }
 
-  throw lastError;
+  // Si llegamos aquí, todo falló
+  let requestId: string | undefined;
+  let message = 'Unknown API Error';
+
+  if (axios.isAxiosError(lastError)) {
+    requestId = lastError.response?.headers['x-request-id'];
+    message = lastError.message;
+  } else if (lastError instanceof Error) {
+    message = lastError.message;
+  }
+
+  throw new ApiError(message, requestId, lastError);
 };
 
 export const getProducts = async (): Promise<Product[]> => {
@@ -111,17 +137,6 @@ export const getPOIs = async (category?: string): Promise<POI[]> => {
     cacheKey
   );
 };
-
-export interface SimulationResponse {
-  recommended_route: RouteResult | null;
-  all_routes: RouteResult[];
-  metrics: {
-    revenue: number;
-    profit: number;
-    distance_total: number;
-    duration_total: number;
-  };
-}
 
 export const simulateRoutes = async (userLat: number, userLng: number, productId: string, weight: number = 100): Promise<SimulationResponse> => {
   return withApiFallback<SimulationResponse>(async (baseUrl) => {

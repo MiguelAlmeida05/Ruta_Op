@@ -6,7 +6,7 @@ import unittest
 # Add backend to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from algorithms import PathFinder
+from app.services.routing.algorithms import PathFinder
 
 class TestAlgorithms(unittest.TestCase):
     def setUp(self):

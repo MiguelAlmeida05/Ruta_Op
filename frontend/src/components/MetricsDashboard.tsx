@@ -1,33 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { Metrics, RouteResult } from '../types';
 import { Truck, DollarSign, Clock, TrendingUp, Leaf, Battery, ShieldCheck, ChevronDown, ChevronUp, Navigation, X, Award, Activity, Zap } from 'lucide-react';
 import clsx from 'clsx';
+import { useStore } from '../store/useStore';
+import { formatDuration } from '../utils/formatters';
 
-interface MetricsDashboardProps {
-  selectedRoute: RouteResult | null;
-  onClose: () => void;
-  showTraceability: boolean;
-  weight: number;
-  setWeight: (w: number) => void;
-  onSimulate: () => void;
-  isSimulating: boolean;
-  simulationProgress?: number;
-  role: 'client' | 'distributor' | 'admin';
-  metrics?: Metrics;
-}
+const MetricsDashboard: React.FC = () => {
+  const {
+    routes,
+    selectedRouteId,
+    setShowMetrics,
+    showSupplyChain: showTraceability,
+    weight,
+    setWeight,
+    startSimulation: onSimulate,
+    isSimulating,
+    simulationProgress,
+    role,
+    globalMetrics
+  } = useStore();
 
-const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ 
-  selectedRoute, 
-  onClose, 
-  showTraceability,
-  weight,
-  setWeight,
-  onSimulate,
-  isSimulating,
-  simulationProgress,
-  role,
-  metrics: externalMetrics
-}) => {
+  const selectedRoute = routes.find(r => r.seller_id === selectedRouteId) || null;
+
   const [expanded, setExpanded] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
   const [commissionPercentage, setCommissionPercentage] = useState(15);
@@ -35,6 +28,10 @@ const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
     time: 0,
     distance: 0
   });
+
+  const getRouteDurationMin = (durationMin?: number) => durationMin || 0;
+
+  const onClose = () => setShowMetrics(false);
 
   useEffect(() => {
     setIsVisible(true);
@@ -47,24 +44,18 @@ const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
   }, [showTraceability]);
 
   // Función para formatear segundos a HH:MM:SS
-  const formatTime = (totalMinutes: number) => {
-    const totalSeconds = Math.floor(totalMinutes * 60);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  };
+  // Deprecated: use utils/formatters
+
 
   useEffect(() => {
     if (!selectedRoute) {
       setAnimatedMetrics({ time: 0, distance: 0 });
       return;
     }
+    const totalTime = getRouteDurationMin(selectedRoute.duration_min);
+    const totalDist = selectedRoute?.distance_km || 0;
     // Si inicia la simulación, usamos el progreso real del mapa
     if (isSimulating) {
-      const totalTime = selectedRoute?.duration_min || 0;
-      const totalDist = selectedRoute?.distance_km || 0;
-      
       // Calcular restantes basado en el progreso (0 a 1)
       const remainingTime = Math.max(0, totalTime * (1 - (simulationProgress || 0)));
       const remainingDist = Math.max(0, totalDist * (1 - (simulationProgress || 0)));
@@ -76,8 +67,8 @@ const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
     } else {
       // Si no simula, mostrar valores estáticos finales
       setAnimatedMetrics({
-        time: selectedRoute?.duration_min || 0,
-        distance: selectedRoute?.distance_km || 0
+        time: totalTime,
+        distance: totalDist
       });
     }
   }, [isSimulating, selectedRoute, simulationProgress]);
@@ -104,9 +95,9 @@ const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
       // Admin Metrics (Calculated locally to ensure consistency with current weight)
       // Base calculation on Distributor Profit (Beneficio) as per user request (15% of 1552.89 ~= 232.93)
       platform_profit: (productCost - logistic) * (commissionPercentage / 100),
-      prediction_accuracy: externalMetrics?.prediction_accuracy || 95.0,
-      revenue_growth: externalMetrics?.revenue_growth || 12.4,
-      avg_time_reduction: externalMetrics?.avg_time_reduction || 18.5
+      prediction_accuracy: globalMetrics?.prediction_accuracy || 95.0,
+      revenue_growth: globalMetrics?.revenue_growth || 12.4,
+      avg_time_reduction: globalMetrics?.avg_time_reduction || 18.5
     };
   };
 
@@ -245,7 +236,7 @@ const MetricsDashboard: React.FC<MetricsDashboardProps> = ({
                 <Clock size={14} />
                 <span className="text-[10px] font-bold uppercase tracking-wider">{isSimulating ? 'Tiempo Restante' : 'Tiempo'}</span>
               </div>
-              <span className="text-sm font-black text-white">{formatTime(animatedMetrics.time)}</span>
+              <span className="text-sm font-black text-white">{formatDuration(animatedMetrics.time)}</span>
             </div>
           </div>
         </div>

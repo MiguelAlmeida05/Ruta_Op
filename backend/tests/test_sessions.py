@@ -7,7 +7,7 @@ import os
 # Add backend to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from simulation_engine import SimulationSessionManager, MarkovChain, SimulationState
+from app.services.simulation.engine import SimulationSessionManager, MarkovChain, SimulationState
 
 class TestSimulationSessions(unittest.TestCase):
     def setUp(self):

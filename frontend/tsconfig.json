@@ -27,10 +27,14 @@
       "@/*": [
         "./src/*"
       ]
-    }
+    },
+    "types": ["node", "vite/client"]
   },
   "include": [
     "src",
-    "api"
+    "api",
+    "playwright.config.ts",
+    "vite.config.ts",
+    "tests"
   ]
 }

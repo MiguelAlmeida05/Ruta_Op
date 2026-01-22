@@ -1,11 +1,13 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, ZoomControl, Polyline, useMapEvents, LayersControl } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { POI, Seller, RouteResult } from '../types';
-import { Package, ShieldCheck, Star, AlertTriangle } from 'lucide-react';
-import clsx from 'clsx';
-import { recalculateRoute } from '../services/api';
+import { Seller, RouteResult } from '../types';
+import { Package, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { useSimulationController } from '../hooks/useSimulationController';
+import { useStore } from '../store/useStore';
+import VehicleMarker from './VehicleMarker';
+import { SellerMarkers, RoutePolylines } from './MapLayers';
 
 const { BaseLayer } = LayersControl;
 
@@ -29,13 +31,6 @@ const UserIcon = L.divIcon({
   iconAnchor: [8, 8]
 });
 
-const SellerIcon = (color: 'green' | 'yellow' | 'red') => L.divIcon({
-  className: 'custom-icon',
-  html: `<div style="background-color: ${color === 'green' ? '#4CAF50' : color === 'yellow' ? '#FFC107' : '#F44336'}; width: 20px; height: 20px; transform: rotate(45deg); border: 2px solid white;"></div>`,
-  iconSize: [20, 20],
-  iconAnchor: [10, 10]
-});
-
 // Custom Icons for Traceability
 const createCustomIcon = (color: string) => new L.Icon({
   iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
@@ -50,34 +45,7 @@ const marketIcon = createCustomIcon('green');
 const clientIcon = createCustomIcon('blue'); // We keep this as is, assuming the image is generic blue
 const poiIcon = createCustomIcon('orange');
 
-const VehicleIcon = L.divIcon({
-  className: 'custom-icon',
-  html: `<div style="background-color: #FFD600; width: 24px; height: 24px; border-radius: 6px; border: 2px solid #000; display: flex; items-center; justify-center; box-shadow: 0 4px 10px rgba(0,0,0,0.3); transform: rotate(45deg);">
-    <div style="transform: rotate(-45deg); display: flex; align-items: center; justify-center;">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>
-    </div>
-  </div>`,
-  iconSize: [24, 24],
-  iconAnchor: [12, 12]
-});
-
 const PORTOVIEJO_COORDS: [number, number] = [-1.0544, -80.4544];
-
-interface DarkMapProps {
-  userLocation: [number, number] | null;
-  setUserLocation: (coords: [number, number]) => void;
-  sellers: Seller[];
-  routes: RouteResult[];
-  selectedRouteId: string | null;
-  onSelectRoute: (id: string) => void;
-  showTraceability?: boolean; 
-  pois?: POI[]; 
-  selectedRoute?: RouteResult | null;
-  isSimulating?: boolean;
-  onSimulationEnd?: () => void;
-  onProgressUpdate?: (progress: number) => void;
-  weight?: number;
-}
 
 // Component to handle map clicks
 const MapEvents: React.FC<{ onClick: (coords: [number, number]) => void }> = ({ onClick }) => {
@@ -113,7 +81,7 @@ const MapController: React.FC<{ routes: RouteResult[], sellers: Seller[], userLo
     // Si hay rutas, priorizar mostrar la geometría de la ruta
     if (routes.length > 0) {
          routes.forEach(r => {
-            r.route_geometry.forEach(pt => bounds.extend(pt));
+            (r.route_geometry as [number, number][]).forEach(pt => bounds.extend(pt));
         });
     }
     
@@ -125,160 +93,40 @@ const MapController: React.FC<{ routes: RouteResult[], sellers: Seller[], userLo
   return null;
 };
 
-const DarkMap: React.FC<DarkMapProps> = ({ 
-  userLocation, 
-  setUserLocation, 
-  sellers, 
-  routes,
-  selectedRouteId,
-  onSelectRoute,
-  showTraceability = false,
-  pois = [],
-  selectedRoute = null,
-  isSimulating = false,
-  onSimulationEnd,
-  onProgressUpdate,
-  weight = 100
-}) => {
+const DarkMap: React.FC = () => {
+  const {
+    userLocation,
+    setUserLocation,
+    sellers,
+    routes,
+    selectedRouteId,
+    setSelectedRouteId: onSelectRoute,
+    showSupplyChain: showTraceability,
+    pois,
+    isSimulating,
+    endSimulation: onSimulationEnd,
+    setSimulationProgress: onProgressUpdate,
+    weight
+  } = useStore();
+
+  const selectedRoute = routes.find(r => r.seller_id === selectedRouteId) || null;
+  
   // Traceability synchronization
   const clientLocation: [number, number] | null = userLocation;
-  const [vehiclePos, setVehiclePos] = useState<[number, number] | null>(null);
-  
-  // Event Simulation State
-  const [activeEvent, setActiveEvent] = useState<{type: string, message: string} | null>(null);
-  const simulationIdRef = React.useRef<string>("");
-  const [dynamicPath, setDynamicPath] = useState<[number, number][] | null>(null);
-  const onProgressUpdateRef = React.useRef<DarkMapProps['onProgressUpdate']>(onProgressUpdate);
-  const onSimulationEndRef = React.useRef<DarkMapProps['onSimulationEnd']>(onSimulationEnd);
-  
-  const pathRef = React.useRef<[number, number][]>([]);
-  const stepRef = React.useRef(0);
-  const eventConfigRef = React.useRef<{triggerStep: number, type: string} | null>(null);
-  const isPausedRef = React.useRef(false);
 
-  useEffect(() => {
-    onProgressUpdateRef.current = onProgressUpdate;
-  }, [onProgressUpdate]);
+  const vehicleMarkerRef = React.useRef<L.Marker>(null);
 
-  useEffect(() => {
-    onSimulationEndRef.current = onSimulationEnd;
-  }, [onSimulationEnd]);
-  
-  // Animation Logic
-  useEffect(() => {
-    if (isSimulating && selectedRoute && Array.isArray(selectedRoute.route_geometry) && selectedRoute.route_geometry.length > 0) {
-      
-      // Initialize Simulation (only if new simulation)
-      if (simulationIdRef.current === "" || stepRef.current === 0) {
-         const newSimId = Math.random().toString(36).substring(7);
-         simulationIdRef.current = newSimId;
-         stepRef.current = 0;
-         // Delivery goes from Seller -> User. Route is usually User -> Seller. So we reverse.
-         pathRef.current = [...selectedRoute.route_geometry].reverse();
-         setDynamicPath(null);
-         setActiveEvent(null);
-         isPausedRef.current = false;
-         
-         // Stochastic Event Config
-         const rand = Math.random();
-         let eventType = null;
-         // 20% Rain, 30% Traffic, 5% Protest => 55% chance of event
-         if (rand < 0.20) eventType = 'rain';
-         else if (rand < 0.50) eventType = 'traffic';
-         else if (rand < 0.55) eventType = 'protest';
-         
-         if (eventType) {
-             const totalSteps = pathRef.current.length;
-             // Trigger between 20% and 80% of the route
-             const triggerStep = Math.floor(totalSteps * (0.2 + Math.random() * 0.6)); 
-             eventConfigRef.current = { triggerStep, type: eventType };
-             console.log(`[Simulation] Event '${eventType}' scheduled at step ${triggerStep}/${totalSteps}`);
-         } else {
-             eventConfigRef.current = null;
-         }
-      }
-
-      const animate = async () => {
-        if (isPausedRef.current) return;
-
-        // Check Event Trigger
-        if (eventConfigRef.current && stepRef.current === eventConfigRef.current.triggerStep) {
-            isPausedRef.current = true;
-            const evt = eventConfigRef.current;
-            eventConfigRef.current = null; // Ensure it triggers only once
-            
-            const typeLabels: Record<string, string> = { 
-                rain: 'Lluvia Intensa', 
-                traffic: 'Tráfico Pesado', 
-                protest: 'Protesta / Cierre' 
-            };
-            
-            setActiveEvent({ 
-                type: evt.type, 
-                message: `Evento inesperado: ${typeLabels[evt.type]}. Recalculando ruta...` 
-            });
-            
-            try {
-                const currentPos = pathRef.current[stepRef.current];
-                // Destination is the last point of the current path (User Location)
-                const destPos = pathRef.current[pathRef.current.length - 1];
-                
-                const result = await recalculateRoute(
-                    currentPos[0], currentPos[1],
-                    destPos[0], destPos[1],
-                    evt.type,
-                    simulationIdRef.current,
-                    stepRef.current / pathRef.current.length
-                );
-                
-                // Update Path: Keep traveled part, append new calculated part
-                const traveledPath = pathRef.current.slice(0, stepRef.current + 1);
-                const newGeometry = result.route_geometry; // This is Current -> Dest
-                
-                // Merge
-                const combinedPath = [...traveledPath, ...newGeometry];
-                
-                pathRef.current = combinedPath;
-                setDynamicPath(combinedPath); // Visual update
-                
-                // Resume after delay
-                setTimeout(() => {
-                    setActiveEvent(prev => prev ? { ...prev, message: `Ruta actualizada. (+${(result.duration_min).toFixed(1)} min)` } : null);
-                    setTimeout(() => setActiveEvent(null), 3000); 
-                    isPausedRef.current = false;
-                }, 2000);
-                
-            } catch (e) {
-                console.error("Failed to recalculate route:", e);
-                isPausedRef.current = false; // Resume if fail
-            }
-            return;
-        }
-
-        if (stepRef.current < pathRef.current.length) {
-          setVehiclePos(pathRef.current[stepRef.current] as [number, number]);
-          onProgressUpdateRef.current?.(stepRef.current / pathRef.current.length);
-          stepRef.current++;
-        } else {
-          // End of simulation
-          // Do not clear interval here, let useEffect cleanup handle it or set state
-          // But we need to stop.
-          isPausedRef.current = true; 
-          setVehiclePos(null);
-          onProgressUpdateRef.current?.(1);
-          onSimulationEndRef.current?.();
-          simulationIdRef.current = ""; 
-        }
-      };
-      
-      const interval = setInterval(animate, 50); // Speed of animation
-
-      return () => clearInterval(interval);
-    } else {
-      setVehiclePos(null);
-      simulationIdRef.current = "";
-    }
-  }, [isSimulating, selectedRoute]); // Dependencies
+  // Use custom hook for simulation logic
+  const { 
+    activeEvent, 
+    dynamicPath 
+  } = useSimulationController({
+    isSimulating: isSimulating || false,
+    selectedRoute: selectedRoute || null,
+    onProgressUpdate,
+    onSimulationEnd,
+    vehicleMarkerRef
+  });
 
   const activeSellers = useMemo(() => {
     if (showTraceability) {
@@ -303,6 +151,7 @@ const DarkMap: React.FC<DarkMapProps> = ({
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
               url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
+              errorTileUrl="https://placehold.co/256x256/1a1a1a/ffffff?text=Map+Tile+Error"
             />
           </BaseLayer>
           <BaseLayer name="Google Maps Satélite">
@@ -360,149 +209,36 @@ const DarkMap: React.FC<DarkMapProps> = ({
         ))}
 
         {/* Vehicle Animation Marker */}
-        {vehiclePos && (
-          <Marker position={vehiclePos} icon={VehicleIcon} zIndexOffset={1000}>
-            <Popup>
-              <div className="text-gray-800 font-bold text-xs">
-                Transportando {selectedRoute?.product_name}...
-              </div>
-            </Popup>
-          </Marker>
+        {isSimulating && selectedRoute && selectedRoute.route_geometry && selectedRoute.route_geometry.length > 0 && (
+          <VehicleMarker 
+            ref={vehicleMarkerRef}
+            initialPosition={selectedRoute.route_geometry[selectedRoute.route_geometry.length - 1] as [number, number]}
+            selectedRoute={selectedRoute}
+          />
         )}
 
         {/* Seller Markers (Standard Mode) */}
-        {!showTraceability && sellers.map((seller) => {
-          const route = routes.find(r => r.seller_id === seller.id);
-          const price = route ? (route.price_per_unit * weight).toFixed(2) : '0.00';
-          
-          // Clasificación visual en el mapa
-          let markerColor: 'green' | 'yellow' | 'red' = 'green';
-          if (seller.rating && seller.trips_count) {
-            if (seller.rating < 3.5 || seller.trips_count < 5) {
-              markerColor = 'red';
-            } else if (seller.rating < 4.5) {
-              markerColor = 'yellow';
-            }
-          }
-
-          return (
-            <Marker 
-              key={seller.id} 
-              position={[seller.coordinates.lat, seller.coordinates.lng]}
-              icon={SellerIcon(markerColor)}
-            >
-              <Popup className="custom-popup">
-                <div className="w-64">
-                  <div className={clsx(
-                    "text-white p-3 pr-12 rounded-t-lg mb-3 flex flex-col justify-center relative min-h-[60px]",
-                    markerColor === 'red' ? "bg-red-600" : markerColor === 'yellow' ? "bg-yellow-600" : "bg-primary"
-                  )}>
-                    <h3 className="font-bold flex items-center gap-2 text-base leading-tight mb-1">
-                      <Package size={18} className="flex-shrink-0" />
-                      <span className="truncate">{seller.name}</span>
-                    </h3>
-                    <div className="flex gap-0.5 ml-[26px]">
-                      {[1, 2, 3, 4, 5].map(s => (
-                        <Star key={s} size={14} className={clsx(s <= (seller.rating || 0) ? "fill-yellow-400 text-yellow-400" : "text-white/30")} />
-                      ))}
-                    </div>
-                  </div>
-                  
-                  <div className="px-3 pb-3 space-y-3 text-sm text-gray-300">
-                    <div className="flex justify-between border-b border-white/10 pb-2">
-                      <span className="text-gray-500">Tipo:</span>
-                      <span className="font-medium text-white">{seller.type}</span>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-2 text-center">
-                      <div className="bg-white/5 p-2 rounded border border-white/10">
-                        <div className="text-xs text-gray-500">Viajes</div>
-                        <div className="font-bold text-primary">{seller.trips_count || 0}</div>
-                      </div>
-                      <div className="bg-white/5 p-2 rounded border border-white/10">
-                        <div className="text-xs text-gray-500">Calificación</div>
-                        <div className="font-bold text-yellow-500">{seller.rating || 0}</div>
-                      </div>
-                    </div>
-
-                    {markerColor === 'red' && (
-                      <div className="bg-red-500/10 text-red-400 text-xs px-2 py-1 rounded border border-red-500/20 text-center font-bold">
-                        En Crecimiento
-                      </div>
-                    )}
-
-                    {route && (
-                      <>
-                        <div className="flex justify-between border-b border-white/10 pb-2">
-                          <span className="text-gray-500">Precio Est. ({weight} qq):</span>
-                          <span className="text-green-400 font-bold">${price}</span>
-                        </div>
-                        <div className="flex justify-between border-b border-white/10 pb-2">
-                          <span className="text-gray-500">Distancia:</span>
-                          <span className="font-bold text-white">{route.distance_km} km</span>
-                        </div>
-                        <div className="flex justify-between border-b border-white/10 pb-2">
-                          <span className="text-gray-500">Tiempo:</span>
-                          <span className="font-bold text-primary">{route.duration_min} min</span>
-                        </div>
-                      </>
-                    )}
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Productos:</span>
-                      <span className="text-xs text-right max-w-[120px] text-gray-400">{seller.products.join(', ')}</span>
-                    </div>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
+        {!showTraceability && (
+          <SellerMarkers 
+            sellers={sellers} 
+            routes={routes} 
+            weight={weight} 
+          />
+        )}
 
         {/* Routes (Standard Mode) */}
-        {!showTraceability && routes.map((route) => {
-          const isSelected = route.seller_id === selectedRouteId;
-          return (
-            <React.Fragment key={route.seller_id}>
-              {/* Outer Glow Polyline for Selected Route */}
-              {isSelected && (
-                <Polyline
-                  positions={route.route_geometry}
-                  pathOptions={{
-                    color: '#1E88E5',
-                    weight: 12,
-                    opacity: 0.2,
-                    lineJoin: 'round',
-                  }}
-                />
-              )}
-              <Polyline
-                positions={route.route_geometry}
-                pathOptions={{
-                  color: isSelected ? '#1E88E5' : '#424242',
-                  weight: isSelected ? 6 : 4,
-                  opacity: isSelected ? 1 : 0.5,
-                  lineJoin: 'round',
-                }}
-                eventHandlers={{
-                  click: () => onSelectRoute(route.seller_id)
-                }}
-              >
-                <Popup>
-                  <div className="text-gray-800">
-                    <strong>Ruta hacia {route.seller_name}</strong><br/>
-                    Tiempo: {route.duration_min} min<br/>
-                    Distancia: {route.distance_km} km
-                  </div>
-                </Popup>
-              </Polyline>
-            </React.Fragment>
-          );
-        })}
+        {!showTraceability && (
+          <RoutePolylines
+            routes={routes}
+            selectedRouteId={selectedRouteId}
+            onSelectRoute={onSelectRoute}
+          />
+        )}
 
         {/* Dynamic Route (Event Triggered) */}
         {dynamicPath && (
            <Polyline
-             positions={dynamicPath}
+             positions={dynamicPath as [number, number][]}
              pathOptions={{
                color: '#FF5722', // Orange/Red for changed route
                weight: 6,
@@ -566,7 +302,7 @@ const DarkMap: React.FC<DarkMapProps> = ({
                   {/* Use precise route geometry if available, otherwise straight dashed line */}
                   {selectedRoute && selectedRoute.seller_id === s.id ? (
                     <Polyline 
-                      positions={selectedRoute.route_geometry} 
+                      positions={selectedRoute.route_geometry as [number, number][]} 
                       pathOptions={{ 
                         color: '#00B0FF', 
                         weight: 3, 

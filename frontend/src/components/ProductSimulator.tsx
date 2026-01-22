@@ -1,35 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { Metrics, Product, Seller, RouteResult } from '../types';
-import { getProducts, getSellers, simulateRoutes } from '../services/api';
+import { Product, Seller, RouteResult } from '../types';
+import { getProducts, getSellers, simulateRoutes, ApiError } from '../services/api';
 import { MapPin, Navigation, Clock, Truck, ShieldCheck, ChevronLeft, ChevronRight } from 'lucide-react';
 import clsx from 'clsx';
+import { useStore } from '../store/useStore';
+import { formatDuration } from '../utils/formatters';
 
-interface ProductSimulatorProps {
-  userLocation: [number, number] | null;
-  onSellersUpdate: (sellers: Seller[]) => void;
-  onRoutesUpdate: (routes: RouteResult[], recommendedRoute: RouteResult | null, metrics: Metrics | null) => void;
-  selectedRouteId: string | null;
-  onSelectRoute: (id: string) => void;
-  showTraceability: boolean;
-  onToggleTraceability: (show: boolean) => void;
-  weight: number;
-}
+const ProductSimulator: React.FC = () => {
+  const {
+    userLocation,
+    setSellers: onSellersUpdate,
+    handleRoutesUpdate: onRoutesUpdate,
+    selectedRouteId,
+    setSelectedRouteId: onSelectRoute,
+    showSupplyChain: showTraceability,
+    setShowSupplyChain: onToggleTraceability,
+    weight,
+    addNotification
+  } = useStore();
 
-const ProductSimulator: React.FC<ProductSimulatorProps> = ({
-  userLocation,
-  onSellersUpdate,
-  onRoutesUpdate,
-  selectedRouteId,
-  onSelectRoute,
-  showTraceability,
-  onToggleTraceability,
-  weight
-}) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<string>('');
   const [simulationLoading, setSimulationLoading] = useState(false);
   const [results, setResults] = useState<RouteResult[]>([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  // Removed unused helper getRouteDurationMin
 
   useEffect(() => {
     const loadData = async () => {
@@ -69,6 +65,7 @@ const ProductSimulator: React.FC<ProductSimulatorProps> = ({
     setSimulationLoading(true);
     try {
       const response = await simulateRoutes(userLocation[0], userLocation[1], selectedProduct, weight);
+      
       setResults(response.all_routes);
       onRoutesUpdate(response.all_routes, response.recommended_route, response.metrics);
       
@@ -91,9 +88,16 @@ const ProductSimulator: React.FC<ProductSimulatorProps> = ({
       if (response.recommended_route) {
         onSelectRoute(response.recommended_route.seller_id);
       }
-    } catch {
-      // Error handling silently
-      alert("Error al simular rutas. Verifica que el servidor backend esté corriendo.");
+      
+      addNotification("Rutas simuladas correctamente", "success");
+    } catch (error) {
+      let msg = "Error al simular rutas.";
+      if (error instanceof ApiError && error.requestId) {
+        msg += ` (ReqID: ${error.requestId})`;
+      } else {
+         msg += " Verifica que el servidor backend esté corriendo.";
+      }
+      addNotification(msg, "error");
     } finally {
       setSimulationLoading(false);
     }
@@ -257,7 +261,7 @@ const ProductSimulator: React.FC<ProductSimulatorProps> = ({
                     </span>
                     <div className="flex items-center gap-1.5 text-xs font-bold text-white bg-white/5 px-2 py-1 rounded-lg">
                       <Clock size={12} className="text-primary" />
-                      {route.duration_min} min
+                      {formatDuration(route.duration_min)}
                     </div>
                   </div>
                   

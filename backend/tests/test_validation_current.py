@@ -7,8 +7,8 @@ import os
 # Add backend to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from algorithms import PathFinder
-from simulation_engine import MarkovChain, SimulationState, FactorSimulator
+from app.services.routing.algorithms import PathFinder
+from app.services.simulation.engine import MarkovChain, SimulationState, FactorSimulator
 
 class TestSystemValidation(unittest.TestCase):
     """
@@ -42,15 +42,15 @@ class TestSystemValidation(unittest.TestCase):
         
     def test_event_handling_traffic(self):
         """Validates that Traffic event penalizes primary roads."""
-        # Traffic penalizes 'primary' by 3.0 (from algorithms.py logic)
-        # 1->2 becomes 30, 2->3 becomes 30. Total Path A = 60.
-        # 1->3 (secondary) penalizes by 1.5 -> 25 * 1.5 = 37.5.
+        # Traffic penalizes 'primary' by 8.0 (from algorithms.py logic)
+        # 1->2 becomes 80, 2->3 becomes 80. Total Path A = 160.
+        # 1->3 (secondary) penalizes by 3.0 -> 25 * 3.0 = 75.
         # Optimal path should switch to 1->3.
         
         result = self.pf.run_dijkstra(1, 3, event_type='traffic')
         
         self.assertEqual(result['path'], [1, 3])
-        self.assertEqual(result['cost'], 37.5)
+        self.assertEqual(result['cost'], 75.0)
 
     def test_markov_chain_integrity(self):
         """Validates Markov Chain probabilities sum to 1."""

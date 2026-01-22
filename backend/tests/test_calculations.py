@@ -1,7 +1,11 @@
 import unittest
 import networkx as nx
-from algorithms import PathFinder, haversine_heuristic
-from simulation_engine import FactorSimulator, SimulationState, KPICalculator
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app.services.routing.algorithms import PathFinder, haversine_heuristic
+from app.services.simulation.engine import FactorSimulator, SimulationState, KPICalculator
 
 class TestAlgorithms(unittest.TestCase):
     def setUp(self):
@@ -17,9 +21,9 @@ class TestAlgorithms(unittest.TestCase):
 
     def test_haversine(self):
         # Distance between (0,0) and (0, 0.01) is approx 1113.2 meters
-        # Max speed 25 m/s -> time approx 44.5s
+        # Max speed 15 m/s (54 km/h) -> time approx 74.2s
         heuristic = haversine_heuristic(1, 2, self.G)
-        self.assertTrue(40 < heuristic < 50)
+        self.assertTrue(70 < heuristic < 80)
 
     def test_dijkstra_path_exists(self):
         result = self.path_finder.run_dijkstra(1, 2)

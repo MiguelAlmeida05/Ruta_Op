@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 # Add backend to path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from simulation_engine import FactorSimulator, SimulationState, _eta_predictor
-from ml.eta_predictor import ETAPredictor
+from app.services.simulation.engine import FactorSimulator, SimulationState, _eta_predictor
+from app.ml.eta_predictor import ETAPredictor
 
 class TestMLIntegration(unittest.TestCase):
     

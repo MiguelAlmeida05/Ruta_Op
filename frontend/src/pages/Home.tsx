@@ -1,59 +1,37 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState } from 'react';
 import DarkMap from '../components/DarkMap';
 import ProductSimulator from '../components/ProductSimulator';
 import MetricsDashboard from '../components/MetricsDashboard';
-import { Metrics, POI, Seller, RouteResult } from '../types';
+import Toast from '../components/Toast';
 import { Star, X, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
+import { useStore } from '../store/useStore';
 
 export default function Home() {
   const navigate = useNavigate();
-  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
-  const [sellers, setSellers] = useState<Seller[]>([]);
-  const [routes, setRoutes] = useState<RouteResult[]>([]);
-  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
-  const [showSupplyChain, setShowSupplyChain] = useState(false);
-  const [showMetrics, setShowMetrics] = useState(true);
   const [rating, setRating] = useState(0);
-  const [pois, setPois] = useState<POI[]>([]);
-  const [role, setRole] = useState<'client' | 'distributor' | 'admin'>('client');
-  const [weight, setWeight] = useState(100);
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [simulationProgress, setSimulationProgress] = useState(0);
-  const [simulationFinished, setSimulationFinished] = useState(false);
-  const [globalMetrics, setGlobalMetrics] = useState<Metrics | null>(null);
+
+  const {
+    role,
+    setRole,
+    showSupplyChain,
+    setShowSupplyChain,
+    showMetrics,
+    selectedRouteId,
+    routes,
+    simulationFinished,
+    setSimulationFinished,
+    setPois
+  } = useStore();
+
+  const selectedRoute = routes.find(r => r.seller_id === selectedRouteId) || null;
 
   React.useEffect(() => {
     // POIs desactivados por limpieza de mapa
     setPois([]);
-  }, []);
-
-  const handleRoutesUpdate = (newRoutes: RouteResult[], recommendedRoute: RouteResult | null, metrics: Metrics | null) => {
-    setRoutes(newRoutes);
-    setGlobalMetrics(metrics);
-    if (recommendedRoute) {
-      setSelectedRouteId(recommendedRoute.seller_id);
-      setShowMetrics(true);
-    }
-  };
+  }, [setPois]);
   
-  const selectedRoute = useMemo(() => {
-    return routes.find(r => r.seller_id === selectedRouteId) || null;
-  }, [routes, selectedRouteId]);
-
-  const handleSimulateTrip = useCallback(() => {
-    setIsSimulating(true);
-    setSimulationFinished(false);
-    setSimulationProgress(0);
-  }, []);
-
-  const handleSimulationEnd = useCallback(() => {
-    setIsSimulating(false);
-    setSimulationFinished(true);
-    setSimulationProgress(1);
-  }, []);
-
   return (
     <div className="h-screen w-screen bg-background text-text overflow-hidden flex flex-col">
       <header className="h-16 bg-surface border-b border-border flex items-center px-6 justify-between shrink-0 z-10 relative shadow-md">
@@ -126,6 +104,7 @@ export default function Home() {
                 onClick={() => {
                   setSimulationFinished(false);
                   setShowSupplyChain(false);
+                  setRating(0);
                 }}
                 className="ml-2 p-1 hover:bg-white/10 rounded-full transition-colors"
               >
@@ -135,46 +114,14 @@ export default function Home() {
         )}
 
         {showMetrics && selectedRoute && (
-          <MetricsDashboard 
-            selectedRoute={selectedRoute} 
-            onClose={() => setShowMetrics(false)} 
-            showTraceability={showSupplyChain}
-            weight={weight}
-            setWeight={setWeight}
-            onSimulate={handleSimulateTrip}
-            isSimulating={isSimulating}
-            simulationProgress={simulationProgress}
-            role={role}
-            metrics={globalMetrics ?? undefined}
-          />
+          <MetricsDashboard />
         )}
 
-        <DarkMap 
-          userLocation={userLocation}
-          setUserLocation={setUserLocation}
-          sellers={sellers}
-          routes={routes}
-          selectedRouteId={selectedRouteId}
-          onSelectRoute={setSelectedRouteId}
-          showTraceability={showSupplyChain}
-          pois={pois}
-          selectedRoute={selectedRoute}
-          isSimulating={isSimulating}
-          onSimulationEnd={handleSimulationEnd}
-          onProgressUpdate={setSimulationProgress}
-          weight={weight}
-        />
+        <DarkMap />
         
-        <ProductSimulator 
-          userLocation={userLocation}
-          onSellersUpdate={setSellers}
-          onRoutesUpdate={handleRoutesUpdate}
-          selectedRouteId={selectedRouteId}
-          onSelectRoute={setSelectedRouteId}
-          showTraceability={showSupplyChain}
-          onToggleTraceability={setShowSupplyChain}
-          weight={weight}
-        />
+        <ProductSimulator />
+        
+        <Toast />
       </main>
     </div>
   );
