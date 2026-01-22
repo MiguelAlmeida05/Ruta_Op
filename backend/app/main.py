@@ -21,7 +21,7 @@ from app.services.graph.loader import DataLoader
 from app.services.routing.algorithms import PathFinder
 from app.core.database import get_supabase
 from app.core.repository import DataRepository
-from app.services.simulation.engine import MarkovChain, FactorSimulator, KPICalculator, AdminKPICalculator, SimulationSessionManager
+from app.services.simulation.engine import MarkovChain, FactorSimulator, KPICalculator, AdminKPICalculator, SimulationSessionManager, SmartRouteEngine
 from app.services.validation.validator_service import ValidatorService
 from app.ml.demand_forecasting.forecaster import DemandForecaster
 from app.core.logger import get_logger
@@ -291,35 +291,50 @@ def simulate_routes(request: SimulationRequest):
 
             dist_km = total_distance_m / 1000
             
-            # 2. Simular Factores
+            # 2. Simular Factores (Base)
             base_metrics = {
                 "duration_min": round(result["cost"] / 60, 2),
                 "distance_km": dist_km
             }
             
+            # 2.1 Aplicar SmartRouteEngine (Ajuste por Estado)
+            smart_result = SmartRouteEngine.calculate_optimal_route(
+                current_route=path_coords,
+                base_duration_min=base_metrics["duration_min"],
+                base_distance_km=base_metrics["distance_km"],
+                state=current_state
+            )
+            
+            # 2.2 Refinar factores con métricas ajustadas
             factors = FactorSimulator.simulate_factors(
                 state=current_state,
-                base_duration_min=base_metrics["duration_min"],
-                distance_km=dist_km
+                base_duration_min=smart_result["final_duration_min"],
+                distance_km=smart_result["final_distance_km"]
             )
             
             # 3. KPIs
-            kpis = KPICalculator.calculate_kpis(factors, base_metrics)
-            transport_cost = 2.50 + (dist_km * 0.35 * factors["fuel_factor"])
+            # Usamos las métricas ajustadas para los KPIs
+            adjusted_base_metrics = {
+                "duration_min": smart_result["final_duration_min"],
+                "distance_km": smart_result["final_distance_km"]
+            }
+            kpis = KPICalculator.calculate_kpis(factors, adjusted_base_metrics)
+            
+            transport_cost = 2.50 + (smart_result["final_distance_km"] * 0.35 * factors["fuel_factor"])
             simulated_price = product.get("price_per_unit", 10) * 0.20
             estimated_revenue = (simulated_price * 100) * seller.get("demand_factor", 1.0)
-            load_percentage = 100 if dist_km < 5 else 85
+            load_percentage = 100 if smart_result["final_distance_km"] < 5 else 85
 
             routes_result.append({
                 "seller_id": seller["id"],
                 "seller_name": seller["name"],
                 "seller_rating": seller.get("rating", 0),
                 "seller_trips": seller.get("trips_count", 0),
-                "route_geometry": path_coords,
-                "duration_seconds": result["cost"], 
-                "distance_meters": total_distance_m,
-                "distance_km": round(dist_km, 2),
-                "duration_min_base": base_metrics["duration_min"],
+                "route_geometry": smart_result["final_route"], # Usar ruta potencialmente ajustada
+                "duration_seconds": smart_result["final_duration_min"] * 60, 
+                "distance_meters": smart_result["final_distance_km"] * 1000,
+                "distance_km": smart_result["final_distance_km"],
+                "duration_min_base": base_metrics["duration_min"], # Original sin ajustar
                 "duration_min": kpis["simulated_duration_min"],
                 "transport_cost": round(transport_cost, 2),
                 "estimated_revenue": round(estimated_revenue, 2),
@@ -331,7 +346,10 @@ def simulate_routes(request: SimulationRequest):
                 "freshness_score": kpis["freshness_score"],
                 "punctuality_score": kpis["punctuality_score"],
                 "satisfaction_score": kpis["satisfaction_score"],
-                "simulation_state": {"state": kpis["state"].value if hasattr(kpis["state"], "value") else kpis["state"]}
+                "simulation_state": {"state": kpis["state"].value if hasattr(kpis["state"], "value") else kpis["state"]},
+                "time_adjustments": smart_result["adjustments"],
+                "route_changed": smart_result["route_changed"],
+                "original_duration_min": smart_result["original_duration_min"]
             })
             
         except Exception as e:

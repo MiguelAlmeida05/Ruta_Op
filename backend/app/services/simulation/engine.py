@@ -3,7 +3,7 @@ from enum import Enum
 import math
 import logging
 import threading
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple
 import uuid
 from app.ml.eta_predictor import ETAPredictor
 from app.core.logger import get_logger
@@ -103,6 +103,92 @@ class SimulationSessionManager:
             chain = MarkovChain()
             chain.from_dict(data)
             self._sessions[session_id] = chain
+
+class SmartRouteEngine:
+    """
+    Motor inteligente para el ajuste dinámico de rutas basado en condiciones del entorno.
+    """
+    @staticmethod
+    def calculate_optimal_route(
+        current_route: List[List[float]],
+        base_duration_min: float,
+        base_distance_km: float,
+        state: SimulationState,
+        path_finder_service = None # Dependency Injection opcional para recalculo real
+    ) -> Dict:
+        """
+        Calcula la ruta óptima y el tiempo ajustado según las condiciones actuales.
+        
+        Args:
+            current_route: Lista de coordenadas [lat, lng] de la ruta original.
+            base_duration_min: Tiempo estimado original en condiciones normales.
+            base_distance_km: Distancia original.
+            state: Estado actual de la simulación (Normal, Tráfico, Lluvia, Huelga).
+            path_finder_service: Servicio capaz de recalcular rutas (si está disponible).
+            
+        Returns:
+            Diccionario con la ruta ajustada, nuevo tiempo, y metadatos de cambios.
+        """
+        
+        result = {
+            "final_route": current_route,
+            "final_duration_min": base_duration_min,
+            "final_distance_km": base_distance_km,
+            "adjustments": [],
+            "route_changed": False,
+            "original_duration_min": base_duration_min
+        }
+        
+        # 1. Condición de TRÁFICO
+        if state == SimulationState.TRAFFIC:
+            # En un sistema real, aquí llamaríamos a path_finder con penalizaciones
+            # Simulamos el hallazgo de una ruta alternativa
+            # Asumimos que la ruta alternativa es más larga en distancia pero evita el atasco total
+            
+            # Lógica: Si hay tráfico pesado, la ruta original se vuelve muy lenta.
+            # Buscamos "ruta alternativa" que aumenta distancia un 10-15% pero controla el tiempo.
+            
+            # Simulación de cambio de geometría (perturbación leve para demo visual)
+            # En producción real, esto sería un re-query al grafo.
+            result["route_changed"] = True
+            result["final_distance_km"] *= 1.12 # +12% distancia
+            
+            # El tiempo aumenta, pero menos que si nos quedáramos en el tráfico
+            # Sin cambio: +80% tiempo. Con cambio: +25% tiempo.
+            added_time = base_duration_min * 0.25
+            result["final_duration_min"] += added_time
+            result["adjustments"].append(f"+{round(added_time, 1)} min por desvío de Tráfico")
+            
+        # 2. Condición de HUELGA
+        elif state == SimulationState.STRIKE:
+            # Huelga implica bloqueo total de ciertos segmentos.
+            # Desvío obligatorio y significativo.
+            result["route_changed"] = True
+            result["final_distance_km"] *= 1.25 # +25% distancia (desvío grande)
+            
+            added_time = base_duration_min * 0.45 # +45% tiempo
+            result["final_duration_min"] += added_time
+            result["adjustments"].append(f"+{round(added_time, 1)} min por evasión de Zona de Huelga")
+
+        # 3. Condición de LLUVIA (Se aplica ENCIMA de cualquier cambio de ruta)
+        if state == SimulationState.RAIN:
+            # La lluvia afecta la velocidad en CUALQUIER ruta (original o alternativa).
+            # Factor: +20% base + intensidad variable (simulada)
+            
+            rain_factor = 0.20 # 20% fijo
+            
+            # Si ya hubo cambio de ruta (por tráfico/huelga), la lluvia afecta ese nuevo tiempo base
+            current_duration = result["final_duration_min"]
+            rain_delay = current_duration * rain_factor
+            
+            result["final_duration_min"] += rain_delay
+            result["adjustments"].append(f"+{round(rain_delay, 1)} min por condiciones de Lluvia")
+
+        # Ajuste final de redondeo
+        result["final_duration_min"] = round(result["final_duration_min"], 2)
+        result["final_distance_km"] = round(result["final_distance_km"], 2)
+        
+        return result
 
 class FactorSimulator:
     @staticmethod

@@ -80,6 +80,9 @@ class RouteResult(BaseModel):
     punctuality_score: Optional[float] = None
     satisfaction_score: Optional[float] = None
     simulation_state: Optional[Dict[str, Any]] = None
+    time_adjustments: Optional[List[str]] = None # Desglose de ajustes (e.g. "+15 min por Lluvia")
+    route_changed: Optional[bool] = False
+    original_duration_min: Optional[float] = None
 
 class SimulationMetrics(BaseModel):
     revenue: float
