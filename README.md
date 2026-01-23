@@ -15,8 +15,166 @@ Plataforma de apoyo para logística de distribución: ruteo sobre una red vial r
 
 ---
 
+## Guion de Presentación (≈5 minutos)
+
+> Tono: dinámico y persuasivo (pitch). Pensado para leerse en voz alta en ~5 minutos.  
+> Convención: _Pausa_ (respira), **Énfasis** (sube intención), → (transición).
+
+**[0:00] Gancho — el problema real**
+
+Imagina que tienes una operación de distribución con múltiples rutas, múltiples productos, y decisiones que se toman “a ojo” porque el sistema no te muestra el impacto real de **clima, tráfico o bloqueos**. _Pausa._  
+En ese contexto, un minuto de error se multiplica por docenas de entregas… y termina siendo **coste, retrasos y clientes molestos**. **TuDistri** nace para responder una pregunta simple, pero crítica: **¿Cuál es la mejor ruta hoy, y cuán confiable es esa decisión si el mundo cambia?**
+
+**[0:40] Concepción — la idea y el enfoque**
+
+Desde el inicio tomamos una decisión: no queríamos un “mapa bonito” con rutas estáticas. Queríamos un sistema que:
+1) rutee sobre una red vial real,  
+2) simule incertidumbre (Monte Carlo) para medir riesgo, y  
+3) evalúe modelos predictivos con métricas claras (no “promesas”).  
+**Énfasis:** no es sólo optimización… es **confianza operativa**.
+
+**[1:20] Investigación y diseño — convertir logística en un producto**
+
+Primero, estructuramos el problema en tres capas:
+- **Capa de ruteo:** Dijkstra para óptimo por costo y A* para acelerar sin perder optimalidad cuando la heurística es admisible.
+- **Capa de simulación:** eventos que alteran costos y resultados (tráfico/lluvia/bloqueos) para pasar de un número a una **distribución**.
+- **Capa de ML:** ETA, impacto y demanda para anticipar duración y carga del sistema con indicadores interpretables.  
+→ Esto nos dio un lenguaje común para negocio y tecnología: rutas, riesgo, puntualidad, costo.
+
+**[2:10] Desarrollo — de prototipo a sistema completo**
+
+Construimos una arquitectura clara: un **backend FastAPI** que carga el grafo y sirve cálculo/validación, y un **frontend React** que convierte resultados en decisiones visuales.
+
+En el camino enfrentamos desafíos reales:
+- **Gráficos vacíos**: no era “falta de UI”, era falta de garantías. Lo resolvimos con validación de contrato en el cliente para detectar respuestas inválidas y mostrar errores accionables, evitando dashboards silenciosos.
+- **Ruteo sin métricas**: no basta con calcular rutas; un equipo necesita saber si el rendimiento y la consistencia son estables. Fortalecimos la validación para casos sin ruta y generamos métricas comparables (tiempos, speedup, discrepancias).
+- **Multiaristas y heurística**: para escenarios reales, el grafo puede tener múltiples aristas entre nodos. Ajustamos la heurística de Haversine y usamos A* capaz de manejar multiaristas correctamente. _Pausa._  
+El resultado: rutas coherentes, y evaluación reproducible.
+
+**[3:40] Pruebas y calidad — convertir “funciona” en “confiable”**
+
+Integramos pruebas y checks en el flujo: lint, typecheck y tests del frontend; tests del backend con escenarios de cálculo y validación.  
+Y añadimos un activo clave: un **Dashboard de Validación**. **Énfasis:** esto es QA en vivo: si algo falla en datos, ruteo o modelos, se ve de inmediato con mensajes útiles, no con un gráfico vacío.
+
+**[4:20] Valor — por qué esto importa a negocio**
+
+Para clientes: significa **menos incertidumbre** y decisiones trazables.  
+Para inversores: significa una base escalable para productos de logística: ruteo + riesgo + ML con validación integrada.  
+**TuDistri** no sólo calcula: **explica, compara y valida**. Eso reduce tiempo de respuesta, mejora puntualidad y habilita iteración rápida sin perder control.
+
+**[4:50] Cierre — llamado a la acción**
+
+Si quieres ver el impacto en tu operación, te invito a dos cosas:  
+1) **probar la demo local** siguiendo los comandos de este README (o la guía paso a paso), y  
+2) revisar el repositorio para ver el diseño técnico y el dashboard de validación.  
+**Énfasis final:** si tu logística depende de decisiones diarias, TuDistri te da una ventaja: **decidir con datos y con confianza**.
+
+---
+
+## Estructura y Funcionamiento Técnico
+
+### 1) Estructura del proyecto (árbol + propósito)
+
+```text
+Ruta_Op/
+  backend/
+    app/
+      core/            # Configuración, middleware, repositorio y DB local
+      services/        # Grafo, ruteo, simulación, validación
+      ml/              # Predictores y demand forecasting (Prophet)
+      main.py          # Entry-point FastAPI + carga de grafo + endpoints
+      schemas.py       # Modelos Pydantic (request/response)
+    tests/             # Pruebas del backend (pytest)
+    requirements.txt   # Dependencias Python
+  frontend/
+    public/            # Assets estáticos (imágenes, favicon)
+    src/
+      pages/           # Pantallas (Home, ValidationDashboard)
+      components/      # UI (mapa, métricas, fórmulas, etc.)
+      hooks/           # Lógica reutilizable (simulación, tema)
+      services/        # Cliente API + tests de servicios
+      validation/      # Validación runtime de respuestas críticas
+      store/           # Estado global (Zustand)
+      api/generated/   # Cliente generado desde OpenAPI
+    tests/             # E2E (Playwright)
+  data/processed/      # Grafo vial (GraphML)
+  scripts/             # Scripts de soporte (setup/dev)
+  README.md            # Pitch + documentación técnica
+  SETUP_GUIDE.md       # Guía paso a paso (más detallada)
+```
+
+### 2) Módulos/funciones clave (qué hace cada pieza)
+
+**Backend (FastAPI)**
+- `app/main.py`: inicializa la app, carga el grafo y expone endpoints `/api/...`.
+- `app/schemas.py`: define contratos Pydantic (validación server-side) para inputs/outputs.
+- `app/core/config.py`: CORS, flags y configuración; afecta el despliegue local.
+- `app/services/graph/loader.py`: carga del grafo GraphML a memoria.
+- `app/services/routing/algorithms.py`: Dijkstra/A* y cálculo de costo bajo eventos.
+- `app/services/simulation/engine.py`: simulación Monte Carlo y KPIs (CV%, IC 95%).
+- `app/services/validation/validator_service.py`: métricas/series para el dashboard (routing y simulación).
+- `app/ml/*`: evaluaciones y predicciones (ETA/impacto/demanda).
+
+**Frontend (React)**
+- `src/pages/Home.tsx`: experiencia principal (mapa + simulación).
+- `src/pages/ValidationDashboard.tsx`: tablero de validación (QA funcional + ML).
+- `src/services/api.ts`: capa de llamadas HTTP con fallback y parseo/errores accionables.
+- `src/validation/validationStats.ts`: valida runtime el shape de `/api/validation/stats` para evitar render vacío.
+- `src/components/DarkMap.tsx`: mapa y rendering de rutas/markers.
+- `src/components/MetricsDashboard.tsx`: visualización de métricas y series.
+- `src/components/FormulaInline.tsx`: UX de fórmulas (texto copiable, accesible).
+
+### 3) Flujo de la aplicación (secuencia de operaciones)
+
+1) El usuario abre el frontend y la app carga catálogo/vendedores desde el backend.
+2) Al solicitar una ruta, el frontend llama a `/api/routes` y renderiza el resultado sobre el mapa.
+3) Si se activa un evento (tráfico/lluvia/bloqueo), el sistema recalcula costos/ruta (p.ej. `/api/routes/recalculate`) y actualiza el estado de simulación.
+4) El dashboard consulta `/api/validation/stats` y endpoints de modelos; el frontend valida el formato de respuesta antes de graficar.
+5) Si el backend devuelve datos incompletos o inválidos, la UI muestra alertas con causas y pasos de corrección (en vez de “gráficos vacíos”).
+
+### 4) Configuración local (comandos concretos)
+
+> Para una guía más extensa con troubleshooting: [SETUP_GUIDE.md](./SETUP_GUIDE.md)
+
+**Clonar**
+
+```bash
+git clone <URL_DEL_REPOSITORIO>
+cd Ruta_Op
+```
+
+**Backend (Windows / PowerShell)**
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Verificar:
+- Swagger: `http://127.0.0.1:8000/docs`
+- Validación: `http://127.0.0.1:8000/api/validation/stats`
+
+**Frontend**
+
+```bash
+cd frontend
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+Verificar:
+- App: `http://127.0.0.1:5173/`
+- Dashboard de validación: navegar a la ruta definida (por defecto `/validation`).
+
+---
+
 ## Tabla de contenidos
 
+- [Guion de Presentación (≈5 minutos)](#guion-de-presentación-5-minutos)
+- [Estructura y Funcionamiento Técnico](#estructura-y-funcionamiento-técnico)
 - [1. ¿Qué es este proyecto?](#1-qué-es-este-proyecto)
 - [2. Funcionalidades principales](#2-funcionalidades-principales)
 - [3. Arquitectura general](#3-arquitectura-general)
