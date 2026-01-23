@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Product, Seller, RouteResult } from '../types';
 import { getProducts, getSellers, simulateRoutes, ApiError } from '../services/api';
 import { MapPin, Navigation, Clock, Truck, ShieldCheck, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -59,7 +59,7 @@ const ProductSimulator: React.FC = () => {
     }
   }, [selectedRouteId]);
 
-  const handleSimulate = async () => {
+  const runSimulation = useCallback(async (notify: boolean) => {
     if (!userLocation || !selectedProduct) return;
     
     setSimulationLoading(true);
@@ -85,11 +85,11 @@ const ProductSimulator: React.FC = () => {
         }));
       onSellersUpdate(sellersWithRating as Seller[]);
 
-      if (response.recommended_route) {
+      if (response.recommended_route && !selectedRouteId) {
         onSelectRoute(response.recommended_route.seller_id);
       }
       
-      addNotification("Rutas simuladas correctamente", "success");
+      if (notify) addNotification("Rutas simuladas correctamente", "success");
     } catch (error) {
       let msg = "Error al simular rutas.";
       if (error instanceof ApiError && error.requestId) {
@@ -97,11 +97,13 @@ const ProductSimulator: React.FC = () => {
       } else {
          msg += " Verifica que el servidor backend esté corriendo.";
       }
-      addNotification(msg, "error");
+      if (notify) addNotification(msg, "error");
     } finally {
       setSimulationLoading(false);
     }
-  };
+  }, [addNotification, onRoutesUpdate, onSelectRoute, onSellersUpdate, selectedProduct, selectedRouteId, userLocation, weight]);
+
+  const handleSimulate = async () => runSimulation(true);
 
   return (
     <>
@@ -275,8 +277,31 @@ const ProductSimulator: React.FC = () => {
                       {route.distance_km} km
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-                      <span className="text-success">Tráfico Fluido</span>
+                      <div
+                        className={clsx(
+                          "w-1.5 h-1.5 rounded-full animate-pulse",
+                          route.simulation_state?.state === 'Tráfico'
+                            ? "bg-yellow-400"
+                            : route.simulation_state?.state === 'Lluvia'
+                              ? "bg-blue-400"
+                              : route.simulation_state?.state === 'Huelga'
+                                ? "bg-red-400"
+                                : "bg-success"
+                        )}
+                      />
+                      <span
+                        className={clsx(
+                          route.simulation_state?.state === 'Tráfico'
+                            ? "text-yellow-400"
+                            : route.simulation_state?.state === 'Lluvia'
+                              ? "text-blue-400"
+                              : route.simulation_state?.state === 'Huelga'
+                                ? "text-red-400"
+                                : "text-success"
+                        )}
+                      >
+                        {route.simulation_state?.state || 'Normal'}
+                      </span>
                     </div>
                   </div>
                 </div>

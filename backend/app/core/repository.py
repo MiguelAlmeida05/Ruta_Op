@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional, Any
-from app.core.database import get_supabase
+from app.core.localdb import fetch_product_by_id, fetch_products, fetch_sellers, log_simulation_event, seed_if_empty
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -31,67 +31,40 @@ MOCK_SELLERS = [
 
 class DataRepository:
     def __init__(self):
-        self.supabase = get_supabase()
-        if not self.supabase:
-            logger.warning("Repository initialized in OFFLINE mode (Mock Data).")
-        else:
-            logger.info("Repository initialized in ONLINE mode (Supabase).")
+        seed_if_empty(MOCK_PRODUCTS, MOCK_SELLERS)
+        logger.info("Repository initialized in LOCAL DB mode (SQLite).")
 
     def get_products(self) -> List[Dict[str, Any]]:
-        if self.supabase:
-            try:
-                response = self.supabase.table("products").select("*").execute()
-                return response.data
-            except Exception as e:
-                logger.error(f"Supabase error fetching products: {e}. Falling back to mock data.")
-        
-        return MOCK_PRODUCTS
+        try:
+            return fetch_products()
+        except Exception as e:
+            logger.error(f"Local DB error fetching products: {e}. Falling back to mock data.")
+            return MOCK_PRODUCTS
 
     def get_product_by_id(self, product_id: str) -> Optional[Dict[str, Any]]:
-        if self.supabase:
-            try:
-                response = self.supabase.table("products").select("*").eq("id", product_id).single().execute()
-                return response.data
-            except Exception as e:
-                logger.error(f"Supabase error fetching product {product_id}: {e}")
-        
-        # Fallback search
+        try:
+            found = fetch_product_by_id(product_id)
+            if found:
+                return found
+        except Exception as e:
+            logger.error(f"Local DB error fetching product {product_id}: {e}")
+
         return next((p for p in MOCK_PRODUCTS if p["id"] == product_id), None)
 
     def get_sellers(self, product_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        if self.supabase:
-            try:
-                query = self.supabase.table("sellers").select("*")
-                if product_id:
-                    query = query.filter("products", "cs", f"{{{product_id}}}")
-                response = query.execute()
-                return response.data
-            except Exception as e:
-                logger.error(f"Supabase error fetching sellers: {e}. Falling back to mock data.")
-
-        # Fallback filtering
-        if product_id:
-            return [s for s in MOCK_SELLERS if product_id in s["products"]]
-        return MOCK_SELLERS
+        try:
+            return fetch_sellers(product_id=product_id)
+        except Exception as e:
+            logger.error(f"Local DB error fetching sellers: {e}. Falling back to mock data.")
+            if product_id:
+                return [s for s in MOCK_SELLERS if product_id in s["products"]]
+            return MOCK_SELLERS
 
     def get_pois(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
-        if self.supabase:
-            try:
-                query = self.supabase.table("pois").select("*")
-                if category:
-                    query = query.eq("category", category)
-                response = query.execute()
-                return response.data
-            except Exception as e:
-                logger.error(f"Supabase error fetching POIs: {e}")
-        
-        return [] # No mock POIs defined yet
+        return []
 
     def log_simulation_event(self, event_data: Dict[str, Any]):
-        if self.supabase:
-            try:
-                self.supabase.table("simulation_events").insert(event_data).execute()
-            except Exception as e:
-                logger.error(f"Failed to log event to Supabase: {e}")
-        else:
-            logger.info(f"Event logged locally (Offline): {event_data['event_type']}")
+        try:
+            log_simulation_event(str(event_data.get("event_type") or "unknown"), event_data)
+        except Exception as e:
+            logger.error(f"Failed to log event to Local DB: {e}")

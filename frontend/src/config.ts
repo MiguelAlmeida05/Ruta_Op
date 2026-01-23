@@ -13,7 +13,7 @@ const getEnvVar = (key: string, defaultValue?: string): string => {
 };
 
 export const config: Config = {
-  API_URL: getEnvVar('VITE_API_URL', 'http://127.0.0.1:8000'),
+  API_URL: getEnvVar('VITE_API_URL', 'http://127.0.0.1:8000/api'),
   MAPBOX_TOKEN: getEnvVar('VITE_MAPBOX_TOKEN', ''),
 };
 

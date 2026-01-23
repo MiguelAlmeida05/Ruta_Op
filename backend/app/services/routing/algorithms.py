@@ -69,10 +69,8 @@ def haversine_heuristic(u, v, G):
         math.sin(delta_lambda / 2)**2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     
-    # Return estimated time (seconds) assuming max speed (e.g., 90 km/h = 25 m/s)
-    # This keeps the heuristic admissible (never overestimates if we use max possible speed)
-    # Adjusted to 15 m/s (54 km/h) to be more realistic for city driving
-    max_speed_mps = 15.0 
+    # Return estimated time (seconds) assuming an optimistic max speed (keeps heuristic admissible)
+    max_speed_mps = 40.0
     return (R * c) / max_speed_mps
 
 class PathFinder:
@@ -260,7 +258,7 @@ class PathFinder:
             "time_seconds": end_time - start_time
         }
 
-    def run_astar(self, source, target, weight='weight', event_type=None):
+    def run_astar(self, source, target, weight='weight', event_type=None, vehicle_profile=None):
         """
         Runs A* algorithm and returns path and stats.
         Uses Haversine heuristic.
@@ -270,28 +268,77 @@ class PathFinder:
             return {"algorithm": "A*", "path": [], "cost": float('inf'), "error": "Node not found"}
 
         start_time = time.time()
+
+        if self.rx_graph is not None and source in self.osm_to_rx and target in self.osm_to_rx:
+            u_idx = self.osm_to_rx[source]
+            v_idx = self.osm_to_rx[target]
+
+            def goal_fn(node_data):
+                return node_data == target
+
+            def edge_cost_fn(edge_data):
+                try:
+                    base_weight = float(edge_data.get(weight, 1.0))
+                except (ValueError, TypeError):
+                    base_weight = 1.0
+                if base_weight < 0:
+                    base_weight = 0
+                highway = normalize_highway(edge_data)
+                return apply_penalties(base_weight, highway, event_type, vehicle_profile)
+
+            heuristic_cache = {}
+            def estimate_cost_fn(node_data):
+                cached = heuristic_cache.get(node_data)
+                if cached is not None:
+                    return cached
+                h = haversine_heuristic(node_data, target, self.G)
+                heuristic_cache[node_data] = h
+                return h
+
+            try:
+                path_indices = rx.digraph_astar_shortest_path(self.rx_graph, u_idx, goal_fn, edge_cost_fn, estimate_cost_fn)
+                if not path_indices:
+                    return {"algorithm": "A* (RX)", "path": [], "cost": float('inf'), "error": "No path"}
+
+                final_path = [self.rx_to_osm[i] for i in path_indices]
+
+                cost = 0.0
+                for i in range(len(path_indices) - 1):
+                    u, v = path_indices[i], path_indices[i + 1]
+                    edges = self.rx_graph.get_all_edge_data(u, v)
+                    min_edge_weight = float('inf')
+                    for edge_data in edges:
+                        w = edge_cost_fn(edge_data)
+                        if w < min_edge_weight:
+                            min_edge_weight = w
+                    if math.isinf(min_edge_weight):
+                        continue
+                    cost += min_edge_weight
+
+                end_time = time.time()
+                return {"algorithm": "A* (RX)", "path": final_path, "cost": cost, "explored_nodes": -1, "time_seconds": end_time - start_time}
+            except Exception as e:
+                logger.error(f"Error in RX A*: {e}")
+
         explored_count = 0
-        
-        # Priority queue: (f_score, cost, node)
         pq = [(0, 0, source)]
         visited = set()
         min_dist = {source: 0}
         parents = {source: None}
-        
+
         final_path = []
         cost = float('inf')
-        
+
         while pq:
             _, current_cost, u = heapq.heappop(pq)
-            
+
             if u in visited:
                 continue
-            
+
             visited.add(u)
             explored_count += 1
-            
+
             if u == target:
-                # Reconstruct path
                 curr = u
                 while curr is not None:
                     final_path.append(curr)
@@ -299,17 +346,25 @@ class PathFinder:
                 final_path.reverse()
                 cost = current_cost
                 break
-            
-            for v, data in self.G[u].items():
-                try:
-                    edge_weight = float(data[0].get(weight, 1))
-                except:
-                    edge_weight = 1.0
-                if edge_weight < 0:
-                     edge_weight = 0
-                     
-                new_cost = current_cost + edge_weight
-                
+
+            for v, keydict in self.G[u].items():
+                best_edge_cost = None
+                for edge_data in keydict.values():
+                    try:
+                        base_weight = float(edge_data.get(weight, 1))
+                    except Exception:
+                        base_weight = 1.0
+                    if base_weight < 0:
+                        base_weight = 0
+                    highway = normalize_highway(edge_data)
+                    modified_weight = apply_penalties(base_weight, highway, event_type, vehicle_profile)
+                    if best_edge_cost is None or modified_weight < best_edge_cost:
+                        best_edge_cost = modified_weight
+                if best_edge_cost is None:
+                    continue
+
+                new_cost = current_cost + best_edge_cost
+
                 if new_cost < min_dist.get(v, float('inf')):
                     min_dist[v] = new_cost
                     parents[v] = u
@@ -318,11 +373,5 @@ class PathFinder:
                     heapq.heappush(pq, (f_score, new_cost, v))
 
         end_time = time.time()
-        
-        return {
-            "algorithm": "A*",
-            "path": final_path,
-            "cost": cost,
-            "explored_nodes": explored_count,
-            "time_seconds": end_time - start_time
-        }
+
+        return {"algorithm": "A*", "path": final_path, "cost": cost, "explored_nodes": explored_count, "time_seconds": end_time - start_time}

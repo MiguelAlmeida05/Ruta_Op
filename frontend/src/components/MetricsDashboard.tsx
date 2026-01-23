@@ -20,6 +20,12 @@ const MetricsDashboard: React.FC = () => {
   } = useStore();
 
   const selectedRoute = routes.find(r => r.seller_id === selectedRouteId) || null;
+  const selectedRouteExt = selectedRoute as (typeof selectedRoute & {
+    emissions_kg_co2?: number;
+    efficiency_score?: number;
+    waste_percent?: number;
+    energy_saving_percent?: number;
+  }) | null;
 
   const [expanded, setExpanded] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
@@ -75,38 +81,27 @@ const MetricsDashboard: React.FC = () => {
 
   if (!selectedRoute || !isVisible) return null;
 
-  // Usar métricas externas (del backend) o calcular locales si no hay
-  // Aseguramos que se recalcule si cambia 'weight' (props) aunque no cambie 'selectedRoute'
-  // Si externalMetrics viene del backend, ya trae valores calculados para un peso específico.
-  // Pero si cambiamos el peso en el frontend sin re-simular, debemos actualizar localmente.
-  
   const calculateLocalMetrics = () => {
     const price = selectedRoute.price_per_unit || 0;
-    const logistic = selectedRoute.transport_cost || 0; // Este es fijo por ruta/distancia, no depende del peso (simplificación)
+    const logistic = selectedRoute.transport_cost || 0;
     const productCost = price * weight;
     const totalCost = productCost + logistic;
     
     return {
-      revenue: productCost, // Para distribuidor
-      profit: productCost - logistic, // Simplificado
+      revenue: productCost,
+      profit: selectedRoute.net_profit ?? (productCost - logistic),
       product_cost: productCost,
       logistic_cost: logistic,
       total_client_cost: totalCost,
-      // Admin Metrics (Calculated locally to ensure consistency with current weight)
-      // Base calculation on Distributor Profit (Beneficio) as per user request (15% of 1552.89 ~= 232.93)
-      platform_profit: (productCost - logistic) * (commissionPercentage / 100),
-      prediction_accuracy: globalMetrics?.prediction_accuracy || 95.0,
-      revenue_growth: globalMetrics?.revenue_growth || 12.4,
-      avg_time_reduction: globalMetrics?.avg_time_reduction || 18.5
+      platform_profit: globalMetrics?.platform_profit ?? ((productCost - logistic) * (commissionPercentage / 100)),
+      prediction_accuracy: globalMetrics?.prediction_accuracy || 0,
+      revenue_growth: globalMetrics?.revenue_growth || 0,
+      avg_time_reduction: globalMetrics?.avg_time_reduction || 0
     };
   };
 
   const localMetrics = calculateLocalMetrics();
 
-  // Si hay métricas externas Y coinciden con el peso actual (esto es difícil de saber sin guardar el peso de la simulación),
-  // podríamos usarlas. Pero para reactividad inmediata, mejor usamos el cálculo local basado en el peso actual del estado.
-  // Asumiremos que el backend nos da los unitarios y nosotros multiplicamos.
-  
   const metrics = localMetrics; 
 
   // KPIs del cliente (Fase 2)
@@ -285,7 +280,7 @@ const MetricsDashboard: React.FC = () => {
                    </div>
                    <div>
                       <span className="text-[10px] text-text-secondary block uppercase">Emisiones CO2</span>
-                      <span className="text-sm font-bold text-white">-15.4%</span>
+                      <span className="text-sm font-bold text-white">{(selectedRouteExt?.emissions_kg_co2 ?? 0).toFixed(3)} kg</span>
                    </div>
                 </div>
               )}
@@ -297,7 +292,7 @@ const MetricsDashboard: React.FC = () => {
                    </div>
                    <div>
                       <span className="text-[10px] text-text-secondary block uppercase">Eficiencia</span>
-                      <span className="text-sm font-bold text-white">Clase A+</span>
+                      <span className="text-sm font-bold text-white">{(selectedRouteExt?.efficiency_score ?? 0).toFixed(1)}%</span>
                    </div>
                 </div>
               )}
@@ -339,7 +334,7 @@ const MetricsDashboard: React.FC = () => {
                    </div>
                    <div>
                       <span className="text-[10px] text-text-secondary block uppercase">Desperdicio</span>
-                      <span className="text-sm font-bold text-white">1.2%</span>
+                      <span className="text-sm font-bold text-white">{(selectedRouteExt?.waste_percent ?? 0).toFixed(2)}%</span>
                    </div>
                 </div>
               )}
@@ -351,7 +346,7 @@ const MetricsDashboard: React.FC = () => {
                    </div>
                    <div>
                       <span className="text-[10px] text-text-secondary block uppercase">Ahorro Energía</span>
-                      <span className="text-sm font-bold text-white">22%</span>
+                      <span className="text-sm font-bold text-white">{(selectedRouteExt?.energy_saving_percent ?? 0).toFixed(1)}%</span>
                    </div>
                 </div>
               )}

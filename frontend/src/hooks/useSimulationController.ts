@@ -9,6 +9,7 @@ export interface UseSimulationControllerProps {
   onProgressUpdate?: (progress: number) => void;
   onSimulationEnd?: () => void;
   vehicleMarkerRef: React.RefObject<L.Marker>;
+  onRouteGeometryUpdate?: (geometry: [number, number][]) => void;
 }
 
 export interface SimulationEvent {
@@ -21,7 +22,8 @@ export const useSimulationController = ({
   selectedRoute,
   onProgressUpdate,
   onSimulationEnd,
-  vehicleMarkerRef
+  vehicleMarkerRef,
+  onRouteGeometryUpdate
 }: UseSimulationControllerProps) => {
   // Removed vehiclePos state to prevent re-renders
   const [activeEvent, setActiveEvent] = useState<SimulationEvent | null>(null);
@@ -36,6 +38,7 @@ export const useSimulationController = ({
   // Refs for callbacks to avoid effect dependencies
   const onProgressUpdateRef = useRef(onProgressUpdate);
   const onSimulationEndRef = useRef(onSimulationEnd);
+  const onRouteGeometryUpdateRef = useRef(onRouteGeometryUpdate);
 
   useEffect(() => {
     onProgressUpdateRef.current = onProgressUpdate;
@@ -46,11 +49,18 @@ export const useSimulationController = ({
   }, [onSimulationEnd]);
 
   useEffect(() => {
+    onRouteGeometryUpdateRef.current = onRouteGeometryUpdate;
+  }, [onRouteGeometryUpdate]);
+
+  useEffect(() => {
     if (isSimulating && selectedRoute && Array.isArray(selectedRoute.route_geometry) && selectedRoute.route_geometry.length > 0) {
       
       // Initialize Simulation (only if new simulation)
       if (simulationIdRef.current === "" || stepRef.current === 0) {
-         const newSimId = Math.random().toString(36).substring(7);
+         const newSimId =
+           typeof crypto !== 'undefined' && 'randomUUID' in crypto
+             ? crypto.randomUUID()
+             : Math.random().toString(36).substring(2);
          simulationIdRef.current = newSimId;
          stepRef.current = 0;
          // Delivery goes from Seller -> User. Route is usually User -> Seller. So we reverse.
@@ -75,7 +85,10 @@ export const useSimulationController = ({
          if (eventType) {
              const totalSteps = pathRef.current.length;
              // Trigger between 20% and 80% of the route
-             const triggerStep = Math.floor(totalSteps * (0.2 + Math.random() * 0.6)); 
+             const rawTrigger = Math.floor(totalSteps * (0.2 + Math.random() * 0.6));
+             const minStep = 1;
+             const maxStep = Math.max(1, totalSteps - 2);
+             const triggerStep = Math.max(minStep, Math.min(maxStep, rawTrigger));
              eventConfigRef.current = { triggerStep, type: eventType };
              console.log(`[Simulation] Event '${eventType}' scheduled at step ${triggerStep}/${totalSteps}`);
          } else {
@@ -138,6 +151,7 @@ export const useSimulationController = ({
                         
                         pathRef.current = combinedPath;
                         setDynamicPath(combinedPath); // Visual update
+                        onRouteGeometryUpdateRef.current?.([...combinedPath].reverse());
                         
                         // Resume after delay
                         setTimeout(() => {

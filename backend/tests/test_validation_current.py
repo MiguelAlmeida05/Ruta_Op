@@ -67,10 +67,10 @@ class TestSystemValidation(unittest.TestCase):
         calibrated = FactorSimulator.calibrate_base_time(1.0, 1.0) # 1 min input
         self.assertGreater(calibrated, 3.0)
         
-        # > 15km logic (linear projection)
-        # 20km -> should be roughly extrapolated
+        # > 15km logic (rango realista)
         calibrated_long = FactorSimulator.calibrate_base_time(20.0, 10.0)
-        self.assertGreater(calibrated_long, 30.0)
+        self.assertGreaterEqual(calibrated_long, 27.0)
+        self.assertLessEqual(calibrated_long, 38.0)
 
 if __name__ == '__main__':
     unittest.main()

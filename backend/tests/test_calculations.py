@@ -21,9 +21,9 @@ class TestAlgorithms(unittest.TestCase):
 
     def test_haversine(self):
         # Distance between (0,0) and (0, 0.01) is approx 1113.2 meters
-        # Max speed 15 m/s (54 km/h) -> time approx 74.2s
+        # Max speed 40 m/s (144 km/h) -> time approx 27.8s
         heuristic = haversine_heuristic(1, 2, self.G)
-        self.assertTrue(70 < heuristic < 80)
+        self.assertTrue(24 < heuristic < 32)
 
     def test_dijkstra_path_exists(self):
         result = self.path_finder.run_dijkstra(1, 2)

@@ -18,6 +18,7 @@ export default function Home() {
     showSupplyChain,
     setShowSupplyChain,
     showMetrics,
+    setShowMetrics,
     selectedRouteId,
     routes,
     simulationFinished,
@@ -46,7 +47,10 @@ export default function Home() {
           {(['client', 'distributor', 'admin'] as const).map((r) => (
             <button
               key={r}
-              onClick={() => setRole(r)}
+              onClick={() => {
+                setRole(r);
+                setShowMetrics(r !== 'client');
+              }}
               className={clsx(
                 "px-3 py-1 text-[10px] font-bold rounded uppercase transition-all",
                 role === r ? "bg-primary text-white" : "text-text-secondary hover:text-white"
@@ -67,9 +71,12 @@ export default function Home() {
                Validación de Sistema
              </button>
            )}
-           <button className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-md text-sm font-medium transition-colors shadow-sm">
-            Iniciar Sesión
-          </button>
+           <button
+             onClick={() => setShowMetrics(!showMetrics)}
+             className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-md text-sm font-medium transition-colors shadow-sm"
+           >
+             {showMetrics ? 'Cerrar Dashboard' : 'Abrir Dashboard'}
+           </button>
         </div>
       </header>
 

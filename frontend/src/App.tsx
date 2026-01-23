@@ -1,13 +1,13 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home';
-import Validation from './pages/Validation';
+import ValidationDashboard from './pages/ValidationDashboard';
 
 function App() {
   return (
     <Router>
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/validation" element={<Validation />} />
+        <Route path="/validation" element={<ValidationDashboard />} />
         {/* Add more routes here as the project grows */}
       </Routes>
     </Router>

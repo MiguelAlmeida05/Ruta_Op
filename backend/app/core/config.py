@@ -17,9 +17,8 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
 
-    # Database
-    SUPABASE_URL: Optional[str] = None
-    SUPABASE_KEY: Optional[str] = None
+    # Database (SQLite local)
+    LOCAL_DB_FILENAME: str = "tudistri.sqlite3"
     
     # Observability
     LOG_LEVEL: str = "INFO"

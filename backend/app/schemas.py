@@ -1,34 +1,70 @@
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional, Dict, Any, Literal
+
+ALLOWED_PRODUCT_IDS = {"maiz", "cacao", "arroz", "cafe", "platano", "mani", "limon", "yuca"}
+ALLOWED_EVENT_TYPES = {"rain", "traffic", "protest"}
+ALLOWED_ROUTE_MODES = {"driving"}
 
 class RouteRequest(BaseModel):
-    origin_lat: float
-    origin_lng: float
-    dest_lat: float
-    dest_lng: float
-    mode: str = "driving"
+    origin_lat: float = Field(..., ge=-90.0, le=90.0, description="Latitud de origen (WGS84).")
+    origin_lng: float = Field(..., ge=-180.0, le=180.0, description="Longitud de origen (WGS84).")
+    dest_lat: float = Field(..., ge=-90.0, le=90.0, description="Latitud de destino (WGS84).")
+    dest_lng: float = Field(..., ge=-180.0, le=180.0, description="Longitud de destino (WGS84).")
+    mode: str = Field("driving", description="Modo de ruteo.")
+
+    @field_validator("mode")
+    @classmethod
+    def _validate_mode(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("mode es requerido.")
+        vv = v.strip().lower()
+        if vv not in ALLOWED_ROUTE_MODES:
+            raise ValueError(f"mode inválido. Valores permitidos: {sorted(ALLOWED_ROUTE_MODES)}")
+        return vv
 
 class SimulationRequest(BaseModel):
-    user_lat: float
-    user_lng: float
-    product_id: str
-    weight: float = 1.0
+    user_lat: float = Field(..., ge=-90.0, le=90.0, description="Latitud del usuario (WGS84).")
+    user_lng: float = Field(..., ge=-180.0, le=180.0, description="Longitud del usuario (WGS84).")
+    product_id: str = Field(..., description="ID de producto a simular.")
+    weight: float = Field(1.0, gt=0.0, description="Peso (kg) solicitado.")
     session_id: Optional[str] = None
+
+    @field_validator("product_id")
+    @classmethod
+    def _validate_product_id(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("product_id es requerido.")
+        vv = v.strip().lower()
+        if vv not in ALLOWED_PRODUCT_IDS:
+            raise ValueError(f"product_id inválido. Valores permitidos: {sorted(ALLOWED_PRODUCT_IDS)}")
+        return vv
 
 class RecalculateRequest(BaseModel):
-    current_lat: float
-    current_lng: float
-    dest_lat: float
-    dest_lng: float
-    event_type: str
+    current_lat: float = Field(..., ge=-90.0, le=90.0, description="Latitud actual (WGS84).")
+    current_lng: float = Field(..., ge=-180.0, le=180.0, description="Longitud actual (WGS84).")
+    dest_lat: float = Field(..., ge=-90.0, le=90.0, description="Latitud destino (WGS84).")
+    dest_lng: float = Field(..., ge=-180.0, le=180.0, description="Longitud destino (WGS84).")
+    event_type: str = Field(..., description="Tipo de evento a aplicar en el ruteo.")
     simulation_id: Optional[str] = None
     session_id: Optional[str] = None
-    progress: Optional[float] = 0.0
-    vehicle_weight: Optional[float] = None
+    progress: Optional[float] = Field(0.0, ge=0.0, le=1.0, description="Progreso de la ruta (0..1).")
+    vehicle_weight: Optional[float] = Field(None, gt=0.0, description="Peso del vehículo/carga (kg).")
+
+    @field_validator("event_type")
+    @classmethod
+    def _validate_event_type(cls, v: str) -> str:
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("event_type es requerido.")
+        vv = v.strip().lower()
+        if vv in ("strike", "paro", "paros"):
+            vv = "protest"
+        if vv not in ALLOWED_EVENT_TYPES:
+            raise ValueError(f"event_type inválido. Valores permitidos: {sorted(ALLOWED_EVENT_TYPES)}")
+        return vv
 
 class Coordinates(BaseModel):
-    lat: float
-    lng: float
+    lat: float = Field(..., ge=-90.0, le=90.0)
+    lng: float = Field(..., ge=-180.0, le=180.0)
 
 class Product(BaseModel):
     id: str
@@ -79,6 +115,10 @@ class RouteResult(BaseModel):
     freshness_score: Optional[float] = None
     punctuality_score: Optional[float] = None
     satisfaction_score: Optional[float] = None
+    efficiency_score: Optional[float] = None
+    emissions_kg_co2: Optional[float] = None
+    waste_percent: Optional[float] = None
+    energy_saving_percent: Optional[float] = None
     simulation_state: Optional[Dict[str, Any]] = None
     time_adjustments: Optional[List[str]] = None # Desglose de ajustes (e.g. "+15 min por Lluvia")
     route_changed: Optional[bool] = False

@@ -85,3 +85,19 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(30, 136, 229, 0.4);
 }
+
+/* Recharts: remove focus outline/highlight artifacts */
+.recharts-surface,
+.recharts-wrapper {
+  outline: none;
+}
+
+.recharts-surface:focus,
+.recharts-wrapper:focus {
+  outline: none;
+}
+
+.recharts-tooltip-cursor {
+  fill: transparent !important;
+  stroke: transparent !important;
+}

@@ -106,7 +106,8 @@ const DarkMap: React.FC = () => {
     isSimulating,
     endSimulation: onSimulationEnd,
     setSimulationProgress: onProgressUpdate,
-    weight
+    weight,
+    updateRouteGeometry
   } = useStore();
 
   const selectedRoute = routes.find(r => r.seller_id === selectedRouteId) || null;
@@ -125,7 +126,10 @@ const DarkMap: React.FC = () => {
     selectedRoute: selectedRoute || null,
     onProgressUpdate,
     onSimulationEnd,
-    vehicleMarkerRef
+    vehicleMarkerRef,
+    onRouteGeometryUpdate: (geometry) => {
+      if (selectedRouteId) updateRouteGeometry(selectedRouteId, geometry);
+    }
   });
 
   const activeSellers = useMemo(() => {
